@@ -4,49 +4,49 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 def main(data_csv, output_plot):
-    # Read data from CSV
     df = pd.read_csv(data_csv)
-
-    # # Convert cache_size to log2 scale for x-axis
-    # df['log_cache_size'] = df['cache_size'].apply(lambda x: math.log2(x))
-
-    # Filter to include only powers of 2
-    df = df[df['cache_size'].apply(lambda x: (x & (x - 1)) == 0 and x != 0)]
 
     # Convert cache_size to log2 scale for x-axis
     df['log_cache_size'] = df['cache_size'].apply(lambda x: math.log2(x))
+    # df['log_cache_size'] = df['cache_size']
 
+    # Multiply miss_ratio by 100 to convert to percentage
+    df['miss_ratio'] = df['miss_ratio'] * 100
 
     # Plotting
     plt.figure(figsize=(12, 8))
-    plt.plot(df['log_cache_size'], df['miss_ratio'], color='red', label='OPT Miss Ratio Curve')
+    plt.plot(df['log_cache_size'], df['miss_ratio'], color='blue', label='OPT Miss Ratio Curve', linewidth=2)
 
-    # Configure x-axis to show actual cache sizes
-    x_ticks = df['log_cache_size']
-    x_labels = df['cache_size']
-    plt.xticks(ticks=x_ticks, labels=x_labels.astype(int), rotation=45)
+    # Configure x-axis to show cache sizes that are 1 or powers of 2
+    def is_power_of_two(n):
+        return n != 0 and (n & (n - 1)) == 0
 
-    plt.xlabel('Cache Size')
-    plt.ylabel('Miss Ratio')
-    plt.title('OPT Miss Ratio Curve')
-    plt.legend()
-    plt.grid(True)
-    plt.ylim(-0.03, 1.03)
+    mask = df['cache_size'].apply(is_power_of_two)
+    x_ticks = df.loc[mask, 'log_cache_size']
+    x_labels = df.loc[mask, 'cache_size']
+    plt.xticks(ticks=x_ticks, labels=x_labels.astype(int), fontsize=16)
+
+    plt.xlabel('Cache Blocks Number ', fontsize=20) ## of Blocks (64 Bytes)
+    plt.ylabel('Miss Ratio (%)', fontsize=20)
+    # plt.title('OPT Miss Ratio Curve', fontsize=24)
+    plt.legend(fontsize=18)
+    plt.grid(True, linewidth=1.5)
+    plt.ylim(-3, 103)
     plt.tight_layout()
 
-    # Annotate critical points
-    # critical_points = df[df['cache_size'].isin([2, 4, 8, 16, 32])]  # Example critical points
-    for _, row in df.iterrows():
-        plt.annotate(f"{row['miss_ratio']:.2f}",
+    for _, row in df[mask].iterrows():
+        plt.annotate(f"{row['miss_ratio']:.4f}%",
                      (row['log_cache_size'], row['miss_ratio']),
                      textcoords="offset points",
                      xytext=(0,10),
-                     ha='center')
+                     ha='center',
+                     fontsize=14
+                     )
 
     plt.tight_layout()
 
     # Save the plot
-    plt.savefig(output_plot)
+    plt.savefig(output_plot, dpi=300)
     print(f"Plot saved to {output_plot}")
 
 if __name__ == "__main__":

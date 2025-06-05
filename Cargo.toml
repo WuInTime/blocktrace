@@ -4,7 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+dace_trace_gen = { path = "../dace_trace_gen" }
+lru_sim = { path = "../lru_sim" }
+utils = { path = "../utils" }
 serde = { version = "1.0.210", features = ["derive"] }
 csv = "1.3.0"
 rand = "0.8.5"
 indicatif = "0.17.8"
+log = "0.4.22"
