@@ -61,7 +61,7 @@ pub fn convert(
     // 1. Write word_trace.bin.zst (zstd-compressed, 12 bytes per entry)
     let output_path = data_path.join("word_trace.bin.zst");
     let file = File::create(&output_path)?;
-    let buf_writer = BufWriter::new(file);  
+    let buf_writer = BufWriter::new(file);
     let mut writer = Encoder::new(buf_writer, 0)?; // 0 = zstd default level which is 3
 
     for (i, (inst_ptr, word_addr, _clock_time, _is_hit)) in accesses.iter().enumerate() {

@@ -1,13 +1,13 @@
 use csv::ReaderBuilder;
 use csv::Writer;
+use lru_sim::update_hit_miss_csv;
 use std::collections::HashMap;
 use std::error::Error;
-use std::fs::{create_dir_all, File};
+use std::fs::{File, create_dir_all};
 use std::path::PathBuf;
-use lru_sim::update_hit_miss_csv;
 
 const BLOCK_SIZE: usize = 16; // Size of a block in words
-                              // const BLOCK_SIZE: usize = 64; // Size of a block in bytes
+// const BLOCK_SIZE: usize = 64; // Size of a block in bytes
 
 pub fn convert(in_file_path: PathBuf, data_path: PathBuf) -> Result<Vec<usize>, Box<dyn Error>> {
     // let trace_path = format!("{}{}", data_path, in_file_path);
@@ -47,7 +47,6 @@ pub fn convert(in_file_path: PathBuf, data_path: PathBuf) -> Result<Vec<usize>, 
         let instruction_pointer = usize::from_str_radix(&record[0], 16)?; // 16 means hexadecimal
         let address = usize::from_str_radix(&record[1], 16)?;
         let _is_hit = record[2].trim() == "1"; // Assuming the third column indicates hit (1) or miss (0)
-
 
         // Calculate the block tag (RIT using 64-byte blocks)
         let block_tag = address / BLOCK_SIZE;

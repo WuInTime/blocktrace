@@ -54,7 +54,8 @@ pub fn main() {
     // let data_path = "./out/clam/rit/medium/trace/3mm.csv";
     // blockit_and_opt_miss_ratio(data_path.into(), count_cold_as_hit);
 
-    let csv_files = get_files_with_extension("../loc_sys_mount/clam/plru_medium_B512/traces",  "bin");
+    let csv_files =
+        get_files_with_extension("../loc_sys_mount/clam/plru_medium_B512/traces", "bin");
 
     let start = std::time::Instant::now(); // Start timing
 

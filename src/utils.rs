@@ -66,16 +66,13 @@ pub fn write_hit_trace_bin(dir: &Path, file_name: &str, hits: &[bool]) -> std::i
     Ok(())
 }
 
-
 pub fn get_files_with_extension(directory: impl AsRef<Path>, ext: &str) -> Vec<PathBuf> {
     let mut files: Vec<_> = fs::read_dir(directory)
         .into_iter()
         .flatten() // Handles the Result from read_dir
         .filter_map(Result::ok) // Filter out any failed entry reads
         .map(|entry| entry.path())
-        .filter(|path| {
-            path.is_file() && path.extension().map_or(false, |s| s == ext)
-        })
+        .filter(|path| path.is_file() && path.extension().map_or(false, |s| s == ext))
         .collect();
 
     files.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
