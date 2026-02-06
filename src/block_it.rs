@@ -35,7 +35,7 @@ pub fn convert(in_file_path: PathBuf, data_path: PathBuf) -> Result<Vec<usize>, 
     let mut clock_time: usize = 1;
     let mut last_access_map: HashMap<usize, usize> = HashMap::new();
     let mut block_trace: Vec<usize> = Vec::new();
-    let mut hit_trace: Vec<u8> = Vec::new();
+    let mut hit_trace: Vec<bool> = Vec::new();
 
     for result in rdr.records() {
         let record = result?;
@@ -52,7 +52,7 @@ pub fn convert(in_file_path: PathBuf, data_path: PathBuf) -> Result<Vec<usize>, 
         // Calculate the block tag (RIT using 64-byte blocks)
         let block_tag = address / BLOCK_SIZE;
         block_trace.push(block_tag);
-        hit_trace.push(_is_hit as u8);
+        hit_trace.push(_is_hit);
         let reuse_interval = last_access_map
             .insert(block_tag, clock_time)
             .map_or(i32::MAX, |last_time| (clock_time - last_time) as i32);

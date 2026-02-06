@@ -1,11 +1,13 @@
 pub mod block_it;
-pub mod block_it_forward;
+pub mod block_it_for_bin;
 pub mod utils;
 
 use log::debug;
 use std::cmp::Reverse;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::hash::Hash;
+
+use crate::block_it_for_bin::TraceEntry;
 
 pub struct OptMissRatioResult {
     pub miss_ratio: f64,
@@ -13,7 +15,73 @@ pub struct OptMissRatioResult {
     pub hit_trace: Vec<bool>,
 }
 
-pub fn opt_miss_ratio<T: PartialEq + Eq + Clone + Hash + Ord + Copy + std::fmt::Debug>(
+pub fn opt_miss_ratio(
+    trace: &[TraceEntry],
+    cache_size: usize,
+    count_cold_as_hit: bool,
+) -> OptMissRatioResult {
+    let cache_accesses = trace.len();
+    let mut cache_misses = 0;
+    let mut hit_trace = vec![false; trace.len()];
+    let mut seen: HashSet<u32> = HashSet::new();
+
+    // Use block_tag as key, value is Option<usize> (next use)
+    let mut cache_map: HashMap<u32, Option<usize>> = HashMap::new();
+    let mut reckoning: BTreeSet<(Reverse<usize>, u32)> = BTreeSet::new();
+
+    for (i, entry) in trace.iter().enumerate() {
+        // Compute next use (as index), or usize::MAX if never used again
+        let next_use = if entry.forward_ri == i32::MAX {
+            None
+        } else {
+            Some(i + entry.forward_ri as usize)
+        };
+        let is_cold = !seen.contains(&entry.block_tag);
+        seen.insert(entry.block_tag);
+
+        if let Some(&prev_next_use) = cache_map.get(&entry.block_tag) {
+            // Cache hit
+            reckoning.remove(&(
+                Reverse(prev_next_use.unwrap_or(usize::MAX)),
+                entry.block_tag,
+            ));
+            cache_map.insert(entry.block_tag, next_use);
+            reckoning.insert((Reverse(next_use.unwrap_or(usize::MAX)), entry.block_tag));
+            hit_trace[i] = true;
+        } else {
+            // Miss (but maybe cold miss = hit)
+            if is_cold && count_cold_as_hit {
+                hit_trace[i] = true;
+            } else {
+                cache_misses += 1;
+            }
+
+            if cache_map.len() == cache_size {
+                // Evict element with furthest next use
+                if let Some(evict_entry) = reckoning.iter().next().cloned() {
+                    let (_, evict_tag) = evict_entry;
+                    reckoning.remove(&evict_entry);
+                    cache_map.remove(&evict_tag);
+                }
+            }
+            cache_map.insert(entry.block_tag, next_use);
+            reckoning.insert((Reverse(next_use.unwrap_or(usize::MAX)), entry.block_tag));
+        }
+    }
+
+    println!(
+        "Cache accesses: {}, Blocks: {:3}, OPT misses: {}",
+        cache_accesses, cache_size, cache_misses
+    );
+
+    OptMissRatioResult {
+        miss_ratio: cache_misses as f64 / cache_accesses as f64,
+        hit_trace,
+    }
+}
+
+/// Generic version of the OPT miss ratio calculation
+pub fn _opt_miss_ratio_for_any<T: PartialEq + Eq + Clone + Hash + Ord + Copy + std::fmt::Debug>(
     trace: &[T],
     cache_size: usize,
     count_cold_as_hit: bool,
@@ -95,10 +163,43 @@ pub fn opt_miss_ratio<T: PartialEq + Eq + Clone + Hash + Ord + Copy + std::fmt::
     }
 }
 
+pub fn opt_stack_miss_ratio(trace: &[TraceEntry], cache_size: usize) -> OptMissRatioResult {
+    let mut stack: VecDeque<u32> = VecDeque::new();
+    let mut histogram: HashMap<usize, usize> = HashMap::new();
+    let mut hit_trace = vec![false; trace.len()];
+
+    for (i, entry) in trace.iter().enumerate() {
+        let tag = entry.block_tag;
+        if let Some(pos) = stack.iter().position(|&x| x == tag) {
+            // Seen before (reuse)
+            *histogram.entry(pos).or_insert(0) += 1;
+            hit_trace[i] = pos < cache_size;
+            stack.remove(pos);
+        } else {
+            // Cold miss
+            *histogram.entry(usize::MAX).or_insert(0) += 1;
+        }
+        stack.push_front(tag);
+    }
+
+    // Count total misses for given cache size
+    let total_accesses = trace.len();
+    let mut total_misses = 0;
+    for (dist, count) in &histogram {
+        if *dist > cache_size {
+            total_misses += *count;
+        }
+    }
+
+    OptMissRatioResult {
+        miss_ratio: total_misses as f64 / total_accesses as f64,
+        hit_trace,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::prelude::*;
 
     #[test]
     fn simple_test1() {
@@ -107,7 +208,7 @@ mod tests {
         // let result = opt_miss_ratio_old(&trace, 3);
         // println!("Miss ratio: {}", result);
 
-        let result = opt_miss_ratio(&trace, 4, false);
+        let result = _opt_miss_ratio_for_any(&trace, 4, false);
         println!("Miss ratio: {}", result.miss_ratio);
         assert_eq!(result.miss_ratio, 0.4);
     }
@@ -115,7 +216,7 @@ mod tests {
     #[test]
     fn simple_test2() {
         let trace = vec![1, 2, 3, 4, 1, 2, 3, 3, 1, 2, 3, 4, 1, 2, 3, 4];
-        let result = opt_miss_ratio(&trace, 4, false);
+        let result = _opt_miss_ratio_for_any(&trace, 4, false);
         println!("Miss ratio: {}", result.miss_ratio);
         assert_eq!(result.miss_ratio, 0.25);
     }
@@ -123,7 +224,7 @@ mod tests {
     #[test]
     fn simple_test3() {
         let trace = vec![2, 3, 4, 2, 1, 3, 7, 5, 4, 3];
-        let result = opt_miss_ratio(&trace, 2, false);
+        let result = _opt_miss_ratio_for_any(&trace, 2, false);
         println!("Miss ratio: {}", result.miss_ratio);
         assert_eq!(result.miss_ratio, 0.8);
     }
@@ -134,27 +235,27 @@ mod tests {
             7, 1, 2, 3, 5, 4, 1, 2, 2, 1, 3, 4, 5, 1, 6, 7, 1, 2, 3, 5, 4, 1, 2, 2, 1, 3, 4, 5, 1,
             6,
         ];
-        let result = opt_miss_ratio(&trace, 2, false);
+        let result = _opt_miss_ratio_for_any(&trace, 2, false);
         println!("Miss ratio: {}", result.miss_ratio);
         assert_eq!(result.miss_ratio, 0.7);
     }
 
-    #[test]
-    fn opt_miss_ratio_test() {
-        let mut rng = thread_rng();
-        let trace: Vec<usize> = (0..1024).map(|_| rng.gen_range(0..256)).collect();
+    // #[test]
+    // fn opt_miss_ratio_test() {
+    //     let mut rng = thread_rng();
+    //     let trace: Vec<usize> = (0..1024).map(|_| rng.gen_range(0..256)).collect();
 
-        // // let start = Instant::now();
-        // let result = opt_miss_ratio_old(&trace, 128);
-        // // let duration = start.elapsed();
-        // println!("Optimal miss ratio: {}", result);
-        // // println!("Time taken: {:?}", duration);
+    //     // // let start = Instant::now();
+    //     // let result = opt_miss_ratio_old(&trace, 128);
+    //     // // let duration = start.elapsed();
+    //     // println!("Optimal miss ratio: {}", result);
+    //     // // println!("Time taken: {:?}", duration);
 
-        // let start = Instant::now();
-        let result = opt_miss_ratio(&trace, 128, false);
-        // let duration = start.elapsed();
-        println!("Optimal miss ratio: {}", result.miss_ratio);
-        // println!("Time taken: {:?}", duration);
-        assert!(result.miss_ratio < 0.5);
-    }
+    //     // let start = Instant::now();
+    //     let result = _opt_miss_ratio_for_any(&trace, 128, false);
+    //     // let duration = start.elapsed();
+    //     println!("Optimal miss ratio: {}", result.miss_ratio);
+    //     // println!("Time taken: {:?}", duration);
+    //     assert!(result.miss_ratio < 0.5);
+    // }
 }

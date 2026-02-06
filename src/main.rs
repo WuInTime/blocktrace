@@ -1,81 +1,68 @@
-#![allow(dead_code)]
-#![allow(unused_imports)]
-use constructive_opt::{block_it, block_it_forward, opt_miss_ratio, utils::*};
-use lru_sim::update_hit_miss_csv;
-use serde::Deserialize;
+use constructive_opt::block_it_for_bin::{self, TraceEntry};
+use constructive_opt::opt_miss_ratio;
+use constructive_opt::utils::*;
 use std::error::Error;
 use std::path::{Path, PathBuf};
-use utils;
-
-#[derive(Debug, Deserialize)]
-struct RawAccessTrace {
-    address: String,
-}
+// use utils;
 
 fn generate_opt_miss_ratio_data(
-    trace: &[usize],
-    max_cache_size: usize,
+    trace: &[TraceEntry],
     data_path: &Path,
     count_cold_as_hit: bool,
 ) -> Result<(), Box<dyn Error>> {
-    let mut cache_size = 64;
-    while cache_size <= max_cache_size {
+    // Generate OPT miss ratio data for cache sizes: 128 and 512
+    let cache_sizes = [128, 512];
+
+    for &cache_size in &cache_sizes {
         let miss_result = opt_miss_ratio(trace, cache_size, count_cold_as_hit);
-
-        let hit_trace: Vec<u8> = miss_result
-            .hit_trace
-            .iter()
-            .map(|&is_hit| if is_hit { 1 } else { 0 })
-            .collect();
-        // let miss_count = hit_trace.iter().filter(|&&x| x == 0).count();
-        // println!("opt_{}: total misses = {}", cache_size, miss_count);
-
-        let col_name = format!("opt_{}", cache_size);
-        update_hit_miss_csv(data_path, &col_name, &hit_trace)?;
-
-        cache_size = calculate_next_cache_size(cache_size, true);
+        let col_name = format!("OPT_{}", cache_size);
+        write_hit_trace_bin(data_path, &col_name, &miss_result.hit_trace)?;
     }
+
     println!();
+
     Ok(())
 }
 
-fn blockit_and_opt_miss_ratio(data_path: PathBuf, count_cold_as_hit: bool) {
-    // let in_file_path = format!("{}{}", data_path, "/memtrace.csv");
-    let out_directory = data_path.parent().unwrap().join("results");
-    // println!("out_directory: {}", out_directory.to_str().unwrap());
-    let bench_result_dir = out_directory.join(data_path.file_stem().unwrap());
-    let trace = match block_it_forward::convert(data_path, bench_result_dir.clone()) {
-        Ok(trace) => trace,
-        Err(_e) => {
-            // eprintln!("Error: {}", _e);
-            return;
-        }
-    };
-    // let trace = match block_it::convert("/memtrace.csv", &data_path) {
-    //     Ok(trace) => trace,
-    //     Err(_e) => {
-    //         // eprintln!("Error: {}", _e);
-    //         return;
-    //     }
-    // };
-    generate_opt_miss_ratio_data(&trace, 128, &bench_result_dir, count_cold_as_hit).unwrap();
+fn blockit_and_opt_miss_ratio(
+    data_path: PathBuf,
+    count_cold_as_hit: bool,
+) -> Result<(), Box<dyn Error>> {
+    let out_directory = data_path
+        .parent()
+        .ok_or("Invalid data path parent")?
+        .parent()
+        .ok_or("Invalid data path grand-parent")?
+        .join("results");
+
+    let bench_result_dir = out_directory.join(data_path.file_stem().ok_or("Invalid file stem")?);
+
+    // We log errors inside here or propagate them?
+    // The original code printed error and returned.
+    // Let's propagate error for cleaner handling.
+    let trace = block_it_for_bin::convert(&data_path, bench_result_dir.clone())?;
+
+    generate_opt_miss_ratio_data(&trace, &bench_result_dir, count_cold_as_hit)?;
+    Ok(())
 }
 
 pub fn main() {
+    env_logger::init(); // Initialize logger
+
     let count_cold_as_hit = false;
 
-    // let data_path = "./out/clam/rit/trace_64/heat-3d.csv";
+    // let data_path = "./out/clam/rit/medium/trace/3mm.csv";
     // blockit_and_opt_miss_ratio(data_path.into(), count_cold_as_hit);
 
-    let csv_files = utils::get_csv_files("./out/clam/rit/trace_64");
-    // println!("csv_files: {:?}", csv_files);
-    for csv_file in &csv_files {
-        blockit_and_opt_miss_ratio(csv_file.clone(), count_cold_as_hit);
-    }
+    let csv_files = get_files_with_extension("../loc_sys_mount/clam/plru_medium_B512/traces",  "bin");
 
-    // let subdirectories = utils::get_subdirectories("./out/clam/mvt-part");
-    // for subdir in subdirectories {
-    //     let data_path = subdir;
-    //     blockit_and_opt_miss_ratio(&data_path, count_cold_as_hit);
-    // }
+    let start = std::time::Instant::now(); // Start timing
+
+    for csv_file in &csv_files {
+        if let Err(e) = blockit_and_opt_miss_ratio(csv_file.into(), count_cold_as_hit) {
+            log::error!("Error processing {:?}: {}", csv_file, e);
+        }
+    }
+    let elapsed = start.elapsed(); // End timing
+    log::info!("Total execution time: {:.2?}", elapsed);
 }

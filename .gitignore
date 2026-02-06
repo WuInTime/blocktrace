@@ -26,3 +26,4 @@ Cargo.lock
 out/
 
 src/belady_cache.rs
+.DS_Store
