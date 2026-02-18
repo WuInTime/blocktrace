@@ -62,7 +62,13 @@ pub fn main() {
     //     get_files_with_extension("../loc_sys_mount/clam/plru_medium_l2b512/traces", "gz");
     // traces.extend(traces_gz);
 
-    let traces = get_files_with_extension("../loc_sys_mount/clam/plru_large/traces", "gz");
+    let traces = get_files_with_extension("../../loc_sys_mount/clam/plru_large/traces", "gz");
+
+    if traces.is_empty() {
+        log::warn!(
+            "No trace files found in ../../loc_sys_mount/clam/plru_large/traces! Check path."
+        );
+    }
 
     let start = std::time::Instant::now(); // Start timing
     for trace in &traces {

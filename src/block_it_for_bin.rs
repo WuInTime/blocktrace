@@ -23,51 +23,81 @@ pub fn convert(
 ) -> Result<Vec<TraceEntry>, Box<dyn std::error::Error>> {
     println!("trace_path: {:?}", in_file_path);
 
+    std::fs::create_dir_all(&data_path)?;
+
+    // --- PASS 1: Generate Hit Trace & Count Accesses ---
+    {
+        let file = File::open(in_file_path)?;
+        let reader: Box<dyn Read> = if in_file_path.extension().is_some_and(|ext| ext == "gz") {
+            Box::new(GzDecoder::new(file))
+        } else {
+            Box::new(file)
+        };
+        let mut reader = BufReader::new(reader);
+        let mut buffer = [0u8; 9];
+        let mut hit_trace: Vec<bool> = Vec::new();
+
+        while reader.read_exact(&mut buffer).is_ok() {
+            let is_hit = buffer[8] != 0;
+            hit_trace.push(is_hit);
+        }
+
+        write_hit_trace_bin(&data_path, "plru_512", &hit_trace)?;
+        log::info!("Hit Trace Binary Output Completed. RAM freed.");
+        // hit_trace is dropped here, freeing ~1GB (for 1B entries)
+    }
+
+    // --- PASS 2: Generate RI & Output Trace ---
     let file = File::open(in_file_path)?;
     let reader: Box<dyn Read> = if in_file_path.extension().is_some_and(|ext| ext == "gz") {
         Box::new(GzDecoder::new(file))
     } else {
         Box::new(file)
     };
-    let mut file = BufReader::new(reader);
+    let mut reader = BufReader::new(reader);
     let mut buffer = [0u8; 9];
 
-    // For forward RI: group by block_tag (not word address!)
+    // Accesses storage: Only (PC, Addr).
+    // Clock time is implied by index. Is_hit is gone.
+    // 8 bytes per entry vs 16 bytes previously => 50% RAM saving.
+    let mut accesses: Vec<(u32, u32)> = Vec::new();
     let mut block_access_indices: HashMap<u32, Vec<usize>> = HashMap::new();
-    let mut accesses: Vec<(u32, u32, i32, bool)> = Vec::new(); // (pc, addr, clock_time, is_hit)
-    let mut clock_time = 1;
-    let mut hit_trace: Vec<bool> = Vec::new();
 
-    while file.read_exact(&mut buffer).is_ok() {
+    while reader.read_exact(&mut buffer).is_ok() {
         let pc = u32::from_le_bytes(buffer[0..4].try_into()?);
         let addr = u32::from_le_bytes(buffer[4..8].try_into()?);
-        let is_hit = buffer[8] != 0;
+        // we ignore is_hit in this pass
 
-        let block_tag = addr / BLOCK_SIZE; // used only for RI calculation
+        let block_tag = addr / BLOCK_SIZE;
 
-        hit_trace.push(is_hit);
-        accesses.push((pc, addr, clock_time, is_hit));
         block_access_indices
             .entry(block_tag)
             .or_default()
-            .push(accesses.len() - 1);
-        clock_time += 1;
+            .push(accesses.len()); // store index
+
+        accesses.push((pc, addr));
     }
 
     let mut forward_ri: Vec<i32> = vec![i32::MAX; accesses.len()];
+
+    // Calculate Forward RI
     for indices in block_access_indices.values() {
         for w in indices.windows(2) {
             let curr = w[0];
             let next = w[1];
-            let dt = accesses[next].2 - accesses[curr].2;
+            // Time difference is simply index difference because time increments by 1 per access
+            // Original code: accesses[next].clock - accesses[curr].clock
+            // Since clock starts at 1 and increments by 1: (next+1) - (curr+1) = next - curr
+            let dt = (next as i32) - (curr as i32);
             forward_ri[curr] = dt;
         }
     }
 
-    let mut entries: Vec<TraceEntry> = Vec::with_capacity(accesses.len());
-    std::fs::create_dir_all(&data_path)?;
+    // Drop the map to free ~8GB+ RAM (for 1B entries) before writing output if possible?
+    // We need both 'accesses' and 'forward_ri' for writing.
+    drop(block_access_indices);
 
-    // 1. Write trace (zstd-compressed, 12 bytes per entry)
+    // Write Final Output (zstd-compressed)
     let file_name = if BLOCK_SIZE == 1 {
         "block_trace.bin.zst"
     } else {
@@ -78,22 +108,22 @@ pub fn convert(
     let buf_writer = BufWriter::new(file);
     let mut writer = Encoder::new(buf_writer, 0)?; // 0 = zstd default level which is 3
 
-    for (i, (inst_ptr, word_addr, _clock_time, _is_hit)) in accesses.iter().enumerate() {
-        writer.write_all(&inst_ptr.to_le_bytes())?;
+    let mut entries: Vec<TraceEntry> = Vec::with_capacity(accesses.len());
+
+    for (i, (pc, addr)) in accesses.iter().enumerate() {
+        writer.write_all(&pc.to_le_bytes())?;
         writer.write_all(&forward_ri[i].to_le_bytes())?;
-        writer.write_all(&word_addr.to_le_bytes())?;
+        writer.write_all(&addr.to_le_bytes())?;
 
         entries.push(TraceEntry {
-            block_tag: word_addr / BLOCK_SIZE,
+            block_tag: addr / BLOCK_SIZE,
             forward_ri: forward_ri[i],
         });
     }
     writer.flush()?;
     writer.finish()?; // Finalize zstd stream
 
-    write_hit_trace_bin(&data_path, "plru_512", &hit_trace)?;
-
-    log::info!("Block Trace and Hit Trace Binary Output Completed.");
+    log::info!("Block Trace Binary Output Completed.");
 
     Ok(entries)
 }
