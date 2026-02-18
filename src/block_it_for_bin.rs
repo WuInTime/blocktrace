@@ -44,7 +44,7 @@ pub fn convert(
 
         write_hit_trace_bin(&data_path, "plru_512", &hit_trace)?;
         log::info!("Hit Trace Binary Output Completed. RAM freed.");
-        // hit_trace is dropped here, freeing ~1GB (for 1B entries)
+        // hit_trace is dropped here, (freeing ~1GB for 1B entries)
     }
 
     // --- PASS 2: Generate RI & Output Trace ---
@@ -60,8 +60,11 @@ pub fn convert(
     // Accesses storage: Only (PC, Addr).
     // Clock time is implied by index. Is_hit is gone.
     // 8 bytes per entry vs 16 bytes previously => 50% RAM saving.
-    let mut accesses: Vec<(u32, u32)> = Vec::new();
-    let mut block_access_indices: HashMap<u32, Vec<usize>> = HashMap::new();
+    // Optimization: separate vectors for u16 PC and u32 Addr saves 2 bytes per entry (6 bytes vs 8 bytes).
+    let mut pc_accesses: Vec<u16> = Vec::new();
+    let mut addr_accesses: Vec<u32> = Vec::new();
+    let mut forward_ri: Vec<i32> = Vec::new();
+    let mut last_seen_index: HashMap<u32, usize> = HashMap::new();
 
     while reader.read_exact(&mut buffer).is_ok() {
         let pc = u32::from_le_bytes(buffer[0..4].try_into()?);
@@ -69,33 +72,20 @@ pub fn convert(
         // we ignore is_hit in this pass
 
         let block_tag = addr / BLOCK_SIZE;
+        let curr_idx: usize = addr_accesses.len();
 
-        block_access_indices
-            .entry(block_tag)
-            .or_default()
-            .push(accesses.len()); // store index
-
-        accesses.push((pc, addr));
-    }
-
-    let mut forward_ri: Vec<i32> = vec![i32::MAX; accesses.len()];
-
-    // Calculate Forward RI
-    for indices in block_access_indices.values() {
-        for w in indices.windows(2) {
-            let curr = w[0];
-            let next = w[1];
-            // Time difference is simply index difference because time increments by 1 per access
-            // Original code: accesses[next].clock - accesses[curr].clock
-            // Since clock starts at 1 and increments by 1: (next+1) - (curr+1) = next - curr
-            let dt = (next as i32) - (curr as i32);
-            forward_ri[curr] = dt;
+        if let Some(prev_idx) = last_seen_index.insert(block_tag, curr_idx) {
+            let dist = (curr_idx as i32) - (prev_idx as i32);
+            forward_ri[prev_idx] = dist;
         }
+
+        pc_accesses.push(pc as u16);
+        addr_accesses.push(addr);
+        forward_ri.push(i32::MAX);
     }
 
-    // Drop the map to free ~8GB+ RAM (for 1B entries) before writing output if possible?
-    // We need both 'accesses' and 'forward_ri' for writing.
-    drop(block_access_indices);
+    // Drop the map to free RAM
+    drop(last_seen_index);
 
     // Write Final Output (zstd-compressed)
     let file_name = if BLOCK_SIZE == 1 {
@@ -108,12 +98,14 @@ pub fn convert(
     let buf_writer = BufWriter::new(file);
     let mut writer = Encoder::new(buf_writer, 0)?; // 0 = zstd default level which is 3
 
-    let mut entries: Vec<TraceEntry> = Vec::with_capacity(accesses.len());
+    let mut entries: Vec<TraceEntry> = Vec::with_capacity(addr_accesses.len());
 
-    for (i, (pc, addr)) in accesses.iter().enumerate() {
-        writer.write_all(&pc.to_le_bytes())?;
-        writer.write_all(&forward_ri[i].to_le_bytes())?;
-        writer.write_all(&addr.to_le_bytes())?;
+    for (i, (&pc, &addr)) in pc_accesses.iter().zip(addr_accesses.iter()).enumerate() {
+        let mut buffer = [0u8; 12];
+        buffer[0..4].copy_from_slice(&(pc as u32).to_le_bytes());
+        buffer[4..8].copy_from_slice(&forward_ri[i].to_le_bytes());
+        buffer[8..12].copy_from_slice(&addr.to_le_bytes());
+        writer.write_all(&buffer)?;
 
         entries.push(TraceEntry {
             block_tag: addr / BLOCK_SIZE,
@@ -123,7 +115,7 @@ pub fn convert(
     writer.flush()?;
     writer.finish()?; // Finalize zstd stream
 
-    log::info!("Block Trace Binary Output Completed.");
+    println!("Block Trace Binary Output Completed.");
 
     Ok(entries)
 }
