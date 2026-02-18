@@ -61,7 +61,7 @@ pub fn write_hit_trace_bin(dir: &Path, file_name: &str, hits: &[bool]) -> std::i
 
     // Build and write MSB-first packed bytes (zero-copy)
     let bits: BitVec<u8, Msb0> = hits.iter().copied().collect();
-    let bytes = (bits.len() + 7) / 8;
+    let bytes = bits.len().div_ceil(8);
     writer.write_all(&bits.as_raw_slice()[..bytes])?;
     Ok(())
 }
@@ -72,7 +72,7 @@ pub fn get_files_with_extension(directory: impl AsRef<Path>, ext: &str) -> Vec<P
         .flatten() // Handles the Result from read_dir
         .filter_map(Result::ok) // Filter out any failed entry reads
         .map(|entry| entry.path())
-        .filter(|path| path.is_file() && path.extension().map_or(false, |s| s == ext))
+        .filter(|path| path.is_file() && path.extension().is_some_and(|s| s == ext))
         .collect();
 
     files.sort_by(|a, b| a.file_name().cmp(&b.file_name()));

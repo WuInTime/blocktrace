@@ -30,7 +30,7 @@ pub fn convert(in_file_path: PathBuf, data_path: PathBuf) -> Result<Vec<usize>, 
     // println!("rdr lines: {}", rdr.records().count());
     let mut wtr = Writer::from_writer(output_file);
 
-    wtr.write_record(&["phase_id_ref", "backward_ri", "tag", "time"])?;
+    wtr.write_record(["phase_id_ref", "backward_ri", "tag", "time"])?;
 
     let mut clock_time: usize = 1;
     let mut last_access_map: HashMap<usize, usize> = HashMap::new();

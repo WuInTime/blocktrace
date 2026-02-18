@@ -118,9 +118,9 @@ pub fn _opt_miss_ratio_for_any<T: PartialEq + Eq + Clone + Hash + Ord + Copy + s
 
         if let Some(&prev_next_time) = cache_map.get(element) {
             debug!("Cache hit: {:?}", element);
-            reckoning.remove(&(Reverse(prev_next_time.unwrap()), element.clone()));
-            cache_map.insert(element.clone(), next_time);
-            reckoning.insert((Reverse(next_time.unwrap_or(usize::MAX)), element.clone()));
+            reckoning.remove(&(Reverse(prev_next_time.unwrap()), *element));
+            cache_map.insert(*element, next_time);
+            reckoning.insert((Reverse(next_time.unwrap_or(usize::MAX)), *element));
             hit_trace[i] = true;
         } else {
             // Miss (but maybe cold miss = hit)
@@ -133,20 +133,20 @@ pub fn _opt_miss_ratio_for_any<T: PartialEq + Eq + Clone + Hash + Ord + Copy + s
 
             if cache_map.len() == cache_size {
                 // Evict element with the furthest next use
-                let evict_entry = reckoning.iter().next().unwrap().clone();
+                let evict_entry = *reckoning.iter().next().unwrap();
                 let (_, evict_element) = evict_entry;
                 reckoning.remove(&evict_entry);
                 if cache_map.remove(&evict_element).is_some() {
                     // if found in cache, it means we evicted an element in cache with the new one that has shorter reuse.
                     debug!("Found in cache_map: {:?}", evict_element);
-                    cache_map.insert(element.clone(), next_time);
-                    reckoning.insert((Reverse(next_time.unwrap_or(usize::MAX)), element.clone()));
+                    cache_map.insert(*element, next_time);
+                    reckoning.insert((Reverse(next_time.unwrap_or(usize::MAX)), *element));
                 } else {
                     panic!("item should be in cache")
                 }
             } else {
-                cache_map.insert(element.clone(), next_time);
-                reckoning.insert((Reverse(next_time.unwrap_or(usize::MAX)), element.clone()));
+                cache_map.insert(*element, next_time);
+                reckoning.insert((Reverse(next_time.unwrap_or(usize::MAX)), *element));
             }
         }
     }

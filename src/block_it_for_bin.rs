@@ -3,11 +3,13 @@ use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::PathBuf;
 
+use flate2::read::GzDecoder;
 use zstd::stream::write::Encoder;
 
 use lru_sim::write_hit_trace_bin;
 
-const BLOCK_SIZE: u32 = 16;
+// const BLOCK_SIZE: u32 = 16;
+const BLOCK_SIZE: u32 = 1;
 
 #[derive(Debug, Clone)]
 pub struct TraceEntry {
@@ -20,7 +22,14 @@ pub fn convert(
     data_path: PathBuf,
 ) -> Result<Vec<TraceEntry>, Box<dyn std::error::Error>> {
     println!("trace_path: {:?}", in_file_path);
-    let mut file = BufReader::new(File::open(&in_file_path)?);
+
+    let file = File::open(in_file_path)?;
+    let reader: Box<dyn Read> = if in_file_path.extension().is_some_and(|ext| ext == "gz") {
+        Box::new(GzDecoder::new(file))
+    } else {
+        Box::new(file)
+    };
+    let mut file = BufReader::new(reader);
     let mut buffer = [0u8; 9];
 
     // For forward RI: group by block_tag (not word address!)
@@ -58,8 +67,13 @@ pub fn convert(
     let mut entries: Vec<TraceEntry> = Vec::with_capacity(accesses.len());
     std::fs::create_dir_all(&data_path)?;
 
-    // 1. Write word_trace.bin.zst (zstd-compressed, 12 bytes per entry)
-    let output_path = data_path.join("word_trace.bin.zst");
+    // 1. Write trace (zstd-compressed, 12 bytes per entry)
+    let file_name = if BLOCK_SIZE == 1 {
+        "block_trace.bin.zst"
+    } else {
+        "word_trace.bin.zst"
+    };
+    let output_path = data_path.join(file_name);
     let file = File::create(&output_path)?;
     let buf_writer = BufWriter::new(file);
     let mut writer = Encoder::new(buf_writer, 0)?; // 0 = zstd default level which is 3

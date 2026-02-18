@@ -54,14 +54,20 @@ pub fn main() {
     // let data_path = "./out/clam/rit/medium/trace/3mm.csv";
     // blockit_and_opt_miss_ratio(data_path.into(), count_cold_as_hit);
 
-    let csv_files =
-        get_files_with_extension("../loc_sys_mount/clam/plru_medium_B512/traces", "bin");
+    // let traces = get_files_with_extension("../loc_sys_mount/clam/plru_medium_l2b512/traces", "bin");
+
+    // let mut traces =
+    //     get_files_with_extension("../loc_sys_mount/clam/plru_medium_l2b512/traces", "bin");
+    // let traces_gz =
+    //     get_files_with_extension("../loc_sys_mount/clam/plru_medium_l2b512/traces", "gz");
+    // traces.extend(traces_gz);
+
+    let traces = get_files_with_extension("../loc_sys_mount/clam/plru_large/traces", "gz");
 
     let start = std::time::Instant::now(); // Start timing
-
-    for csv_file in &csv_files {
-        if let Err(e) = blockit_and_opt_miss_ratio(csv_file.into(), count_cold_as_hit) {
-            log::error!("Error processing {:?}: {}", csv_file, e);
+    for trace in &traces {
+        if let Err(e) = blockit_and_opt_miss_ratio(trace.into(), count_cold_as_hit) {
+            log::error!("Error processing {:?}: {}", trace, e);
         }
     }
     let elapsed = start.elapsed(); // End timing
