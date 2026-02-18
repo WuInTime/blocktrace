@@ -7,7 +7,7 @@ use std::cmp::Reverse;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::hash::Hash;
 
-use crate::block_it_for_bin::TraceEntry;
+// use crate::block_it_for_bin::TraceEntry;
 
 pub struct OptMissRatioResult {
     pub miss_ratio: f64,
@@ -16,37 +16,36 @@ pub struct OptMissRatioResult {
 }
 
 pub fn opt_miss_ratio(
-    trace: &[TraceEntry],
+    block_tags: &[u32],
+    forward_refs: &[i32],
     cache_size: usize,
     count_cold_as_hit: bool,
 ) -> OptMissRatioResult {
-    let cache_accesses = trace.len();
+    assert_eq!(block_tags.len(), forward_refs.len());
+    let cache_accesses = block_tags.len();
     let mut cache_misses = 0;
-    let mut hit_trace = vec![false; trace.len()];
+    let mut hit_trace = vec![false; block_tags.len()];
     let mut seen: HashSet<u32> = HashSet::new();
 
     // Use block_tag as key, value is Option<usize> (next use)
     let mut cache_map: HashMap<u32, Option<usize>> = HashMap::new();
     let mut reckoning: BTreeSet<(Reverse<usize>, u32)> = BTreeSet::new();
 
-    for (i, entry) in trace.iter().enumerate() {
+    for (i, (&tag, &forward_ri)) in block_tags.iter().zip(forward_refs.iter()).enumerate() {
         // Compute next use (as index), or usize::MAX if never used again
-        let next_use = if entry.forward_ri == i32::MAX {
+        let next_use = if forward_ri == i32::MAX {
             None
         } else {
-            Some(i + entry.forward_ri as usize)
+            Some(i + forward_ri as usize)
         };
-        let is_cold = !seen.contains(&entry.block_tag);
-        seen.insert(entry.block_tag);
+        let is_cold = !seen.contains(&tag);
+        seen.insert(tag);
 
-        if let Some(&prev_next_use) = cache_map.get(&entry.block_tag) {
+        if let Some(&prev_next_use) = cache_map.get(&tag) {
             // Cache hit
-            reckoning.remove(&(
-                Reverse(prev_next_use.unwrap_or(usize::MAX)),
-                entry.block_tag,
-            ));
-            cache_map.insert(entry.block_tag, next_use);
-            reckoning.insert((Reverse(next_use.unwrap_or(usize::MAX)), entry.block_tag));
+            reckoning.remove(&(Reverse(prev_next_use.unwrap_or(usize::MAX)), tag));
+            cache_map.insert(tag, next_use);
+            reckoning.insert((Reverse(next_use.unwrap_or(usize::MAX)), tag));
             hit_trace[i] = true;
         } else {
             // Miss (but maybe cold miss = hit)
@@ -64,8 +63,8 @@ pub fn opt_miss_ratio(
                     cache_map.remove(&evict_tag);
                 }
             }
-            cache_map.insert(entry.block_tag, next_use);
-            reckoning.insert((Reverse(next_use.unwrap_or(usize::MAX)), entry.block_tag));
+            cache_map.insert(tag, next_use);
+            reckoning.insert((Reverse(next_use.unwrap_or(usize::MAX)), tag));
         }
     }
 
@@ -163,13 +162,12 @@ pub fn _opt_miss_ratio_for_any<T: PartialEq + Eq + Clone + Hash + Ord + Copy + s
     }
 }
 
-pub fn opt_stack_miss_ratio(trace: &[TraceEntry], cache_size: usize) -> OptMissRatioResult {
+pub fn opt_stack_miss_ratio(block_tags: &[u32], cache_size: usize) -> OptMissRatioResult {
     let mut stack: VecDeque<u32> = VecDeque::new();
     let mut histogram: HashMap<usize, usize> = HashMap::new();
-    let mut hit_trace = vec![false; trace.len()];
+    let mut hit_trace = vec![false; block_tags.len()];
 
-    for (i, entry) in trace.iter().enumerate() {
-        let tag = entry.block_tag;
+    for (i, &tag) in block_tags.iter().enumerate() {
         if let Some(pos) = stack.iter().position(|&x| x == tag) {
             // Seen before (reuse)
             *histogram.entry(pos).or_insert(0) += 1;
@@ -183,7 +181,7 @@ pub fn opt_stack_miss_ratio(trace: &[TraceEntry], cache_size: usize) -> OptMissR
     }
 
     // Count total misses for given cache size
-    let total_accesses = trace.len();
+    let total_accesses = block_tags.len();
     let mut total_misses = 0;
     for (dist, count) in &histogram {
         if *dist > cache_size {

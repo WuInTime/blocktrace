@@ -12,15 +12,15 @@ use lru_sim::write_hit_trace_bin;
 const BLOCK_SIZE: u32 = 1;
 
 #[derive(Debug, Clone)]
-pub struct TraceEntry {
-    pub block_tag: u32,
-    pub forward_ri: i32,
+pub struct ProcessedTrace {
+    pub block_tags: Vec<u32>,
+    pub forward_refs: Vec<i32>,
 }
 
 pub fn convert(
     in_file_path: &PathBuf,
     data_path: PathBuf,
-) -> Result<Vec<TraceEntry>, Box<dyn std::error::Error>> {
+) -> Result<ProcessedTrace, Box<dyn std::error::Error>> {
     println!("trace_path: {:?}", in_file_path);
 
     std::fs::create_dir_all(&data_path)?;
@@ -71,7 +71,11 @@ pub fn convert(
         let addr = u32::from_le_bytes(buffer[4..8].try_into()?);
         // we ignore is_hit in this pass
 
-        let block_tag = addr / BLOCK_SIZE;
+        let block_tag = if BLOCK_SIZE > 1 {
+            addr / BLOCK_SIZE
+        } else {
+            addr
+        };
         let curr_idx: usize = addr_accesses.len();
 
         if let Some(prev_idx) = last_seen_index.insert(block_tag, curr_idx) {
@@ -98,24 +102,30 @@ pub fn convert(
     let buf_writer = BufWriter::new(file);
     let mut writer = Encoder::new(buf_writer, 0)?; // 0 = zstd default level which is 3
 
-    let mut entries: Vec<TraceEntry> = Vec::with_capacity(addr_accesses.len());
-
     for (i, (&pc, &addr)) in pc_accesses.iter().zip(addr_accesses.iter()).enumerate() {
         let mut buffer = [0u8; 12];
         buffer[0..4].copy_from_slice(&(pc as u32).to_le_bytes());
         buffer[4..8].copy_from_slice(&forward_ri[i].to_le_bytes());
         buffer[8..12].copy_from_slice(&addr.to_le_bytes());
         writer.write_all(&buffer)?;
-
-        entries.push(TraceEntry {
-            block_tag: addr / BLOCK_SIZE,
-            forward_ri: forward_ri[i],
-        });
     }
     writer.flush()?;
     writer.finish()?; // Finalize zstd stream
 
+    // Free PC vector memory
+    drop(pc_accesses);
+
     println!("Block Trace Binary Output Completed.");
 
-    Ok(entries)
+    // Convert addresses to block tags in-place
+    if BLOCK_SIZE > 1 {
+        for addr in &mut addr_accesses {
+            *addr /= BLOCK_SIZE;
+        }
+    }
+
+    Ok(ProcessedTrace {
+        block_tags: addr_accesses,
+        forward_refs: forward_ri,
+    })
 }

@@ -1,4 +1,4 @@
-use constructive_opt::block_it_for_bin::{self, TraceEntry};
+use constructive_opt::block_it_for_bin::{self, ProcessedTrace};
 use constructive_opt::opt_miss_ratio;
 use constructive_opt::utils::*;
 use std::error::Error;
@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 // use utils;
 
 fn generate_opt_miss_ratio_data(
-    trace: &[TraceEntry],
+    trace: &ProcessedTrace,
     data_path: &Path,
     count_cold_as_hit: bool,
 ) -> Result<(), Box<dyn Error>> {
@@ -14,7 +14,12 @@ fn generate_opt_miss_ratio_data(
     let cache_sizes = [128, 512];
 
     for &cache_size in &cache_sizes {
-        let miss_result = opt_miss_ratio(trace, cache_size, count_cold_as_hit);
+        let miss_result = opt_miss_ratio(
+            &trace.block_tags,
+            &trace.forward_refs,
+            cache_size,
+            count_cold_as_hit,
+        );
         let col_name = format!("OPT_{}", cache_size);
         write_hit_trace_bin(data_path, &col_name, &miss_result.hit_trace)?;
     }
@@ -54,7 +59,7 @@ pub fn main() {
     // let data_path = "./out/clam/rit/medium/trace/3mm.csv";
     // blockit_and_opt_miss_ratio(data_path.into(), count_cold_as_hit);
 
-    // let traces = get_files_with_extension("../loc_sys_mount/clam/plru_medium_l2b512/traces", "bin");
+    let traces = get_files_with_extension("../../loc_sys_mount/clam/plru_medium_l2b512/traces", "bin");
 
     // let mut traces =
     //     get_files_with_extension("../loc_sys_mount/clam/plru_medium_l2b512/traces", "bin");
@@ -62,7 +67,7 @@ pub fn main() {
     //     get_files_with_extension("../loc_sys_mount/clam/plru_medium_l2b512/traces", "gz");
     // traces.extend(traces_gz);
 
-    let traces = get_files_with_extension("../../loc_sys_mount/clam/plru_large/traces", "gz");
+    // let traces = get_files_with_extension("../../loc_sys_mount/clam/plru_large/traces", "gz");
 
     if traces.is_empty() {
         log::warn!(

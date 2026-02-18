@@ -17,6 +17,11 @@
 - **Solution**: Replaced with `HashMap<u32, usize>` to store only the *last* seen index. Forward RI is calculated on-the-fly (`curr_idx - prev_idx`) when the next access arrives.
 - **Benefit**: Massive RAM reduction (O(M) memory where M is unique blocks).
 
+### 4. RAM Optimization: Struct of Arrays (SoA) for Trace Structure
+- **Problem**: `Vec<TraceEntry>` stored `u32` (block_tag) + `i32` (forward_ri) = 8 bytes per entry. This duplicated the data already in `processed_trace`.
+- **Solution**: Refactored `TraceEntry` into separate vectors for `block_tags` and `forward_refs` using SoA. Removed the intermediate vector construction entirely.
+- **Benefit**: Reduced memory usage by ~45% (8 bytes per entry) by avoiding redundant data structures. Now only raw vectors are kept in RAM.
+
 ## Planned Updates
 
 - **Single-Pass Processing**: Merge Pass 1 (Hit Trace) and Pass 2 (Block Trace) to reduce IO and decompression overhead by 50%.
