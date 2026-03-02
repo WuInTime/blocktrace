@@ -11,6 +11,8 @@ use std::hash::Hash;
 
 pub struct OptMissRatioResult {
     pub miss_ratio: f64,
+    pub miss_count: usize,
+    pub cache_accesses: usize,
     // pub miss_counts: Vec<usize>,
     pub hit_trace: Vec<bool>,
 }
@@ -68,13 +70,10 @@ pub fn opt_miss_ratio(
         }
     }
 
-    println!(
-        "Cache accesses: {}, Blocks: {:3}, OPT misses: {}",
-        cache_accesses, cache_size, cache_misses
-    );
-
     OptMissRatioResult {
         miss_ratio: cache_misses as f64 / cache_accesses as f64,
+        miss_count: cache_misses,
+        cache_accesses,
         hit_trace,
     }
 }
@@ -150,14 +149,10 @@ pub fn _opt_miss_ratio_for_any<T: PartialEq + Eq + Clone + Hash + Ord + Copy + s
         }
     }
 
-    // if cache_size.is_power_of_two() {
-    println!(
-        "Cache accesses: {}, Blocks: {:3}, OPT misses: {}",
-        cache_accesses, cache_size, cache_misses
-    );
-    // }
     OptMissRatioResult {
         miss_ratio: cache_misses as f64 / cache_accesses as f64,
+        miss_count: cache_misses,
+        cache_accesses,
         hit_trace,
     }
 }
@@ -191,6 +186,8 @@ pub fn opt_stack_miss_ratio(block_tags: &[u32], cache_size: usize) -> OptMissRat
 
     OptMissRatioResult {
         miss_ratio: total_misses as f64 / total_accesses as f64,
+        miss_count: total_misses,
+        cache_accesses: total_accesses,
         hit_trace,
     }
 }

@@ -1,38 +1,77 @@
 use constructive_opt::block_it_for_bin::{self, ProcessedTrace};
 use constructive_opt::opt_miss_ratio;
 use constructive_opt::utils::*;
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use std::error::Error;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+
+// One row of results per (benchmark × cache_size)
+struct BenchResult {
+    benchmark: String,
+    cache_size: usize,
+    total_accesses: usize,
+    miss_count: usize,
+    miss_ratio: f64,
+}
 
 fn generate_opt_miss_ratio_data(
     trace: &ProcessedTrace,
     data_path: &Path,
     count_cold_as_hit: bool,
-) -> Result<(), Box<dyn Error>> {
-    // Generate OPT miss ratio data for cache sizes: 128 and 512
+    pb: &ProgressBar,
+    bench_name: &str,
+) -> Result<Vec<BenchResult>, Box<dyn Error>> {
     let cache_sizes = [128, 512];
+    let mut results = Vec::new();
 
     for &cache_size in &cache_sizes {
+        pb.set_message(format!("{} — OPT_{cache_size}: running…", bench_name));
+
         let miss_result = opt_miss_ratio(
             &trace.block_tags,
             &trace.forward_refs,
             cache_size,
             count_cold_as_hit,
         );
+
         let col_name = format!("OPT_{}", cache_size);
         write_hit_trace_bin(data_path, &col_name, &miss_result.hit_trace)?;
+
+        pb.set_message(format!(
+            "{} — OPT_{}: {} misses ({:.2}%)",
+            bench_name,
+            cache_size,
+            miss_result.miss_count,
+            miss_result.miss_ratio * 100.0
+        ));
+
+        results.push(BenchResult {
+            benchmark: bench_name.to_string(),
+            cache_size,
+            total_accesses: miss_result.cache_accesses,
+            miss_count: miss_result.miss_count,
+            miss_ratio: miss_result.miss_ratio,
+        });
     }
 
-    println!();
-
-    Ok(())
+    Ok(results)
 }
 
 fn blockit_and_opt_miss_ratio(
     data_path: PathBuf,
     count_cold_as_hit: bool,
-) -> Result<(), Box<dyn Error>> {
+    pb: &ProgressBar,
+) -> Result<Vec<BenchResult>, Box<dyn Error>> {
+    let bench_name = data_path
+        .file_stem()
+        .ok_or("Invalid file stem")?
+        .to_string_lossy()
+        .into_owned();
+
+    pb.set_message(format!("{} — converting trace…", bench_name));
+
     let out_directory = data_path
         .parent()
         .ok_or("Invalid data path parent")?
@@ -40,54 +79,139 @@ fn blockit_and_opt_miss_ratio(
         .ok_or("Invalid data path grand-parent")?
         .join("results");
 
-    let bench_result_dir = out_directory.join(data_path.file_stem().ok_or("Invalid file stem")?);
+    let bench_result_dir = out_directory.join(&bench_name);
 
-    // We log errors inside here or propagate them?
-    // The original code printed error and returned.
-    // Let's propagate error for cleaner handling.
-    let trace = block_it_for_bin::convert(&data_path, bench_result_dir.clone())?;
+    let trace = block_it_for_bin::convert(&data_path, bench_result_dir.clone(), pb)?;
 
-    generate_opt_miss_ratio_data(&trace, &bench_result_dir, count_cold_as_hit)?;
+    let results = generate_opt_miss_ratio_data(
+        &trace,
+        &bench_result_dir,
+        count_cold_as_hit,
+        pb,
+        &bench_name,
+    )?;
+
+    pb.finish_with_message(format!("{} — done ✓", bench_name));
+    Ok(results)
+}
+
+fn write_csv(results: &[BenchResult], traces_dir: &Path) -> Result<(), Box<dyn Error>> {
+    // Place the CSV as a sibling of the traces/ directory
+    let out_path = traces_dir
+        .parent()
+        .ok_or("traces dir has no parent")?
+        .join("opt_summary.csv");
+
+    let mut wtr = csv::Writer::from_path(&out_path)?;
+    wtr.write_record([
+        "benchmark",
+        "cache_size",
+        "total_accesses",
+        "miss_count",
+        "miss_ratio",
+    ])?;
+
+    for r in results {
+        wtr.write_record(&[
+            r.benchmark.clone(),
+            r.cache_size.to_string(),
+            r.total_accesses.to_string(),
+            r.miss_count.to_string(),
+            format!("{:.6}", r.miss_ratio),
+        ])?;
+    }
+    wtr.flush()?;
+
+    println!("\nSummary written to: {}", out_path.display());
     Ok(())
 }
 
 pub fn main() {
-    env_logger::init(); // Initialize logger
+    env_logger::init();
 
-    let physical_cores = num_cpus::get_physical();
+    // let parallelism = num_cpus::get_physical() / 2;
+    let parallelism = 3;
     rayon::ThreadPoolBuilder::new()
-        .num_threads(physical_cores)
+        .num_threads(parallelism)
         .build_global()
         .expect("Failed to build rayon thread pool");
 
     let count_cold_as_hit = false;
 
-    // let data_path = "./out/clam/rit/medium/trace/3mm.csv";
-    // blockit_and_opt_miss_ratio(data_path.into(), count_cold_as_hit);
-
-    let traces =
-        get_files_with_extension("../../loc_sys_mount/clam/plru_medium_l2b512/traces", "bin");
-
-    // let mut traces =
-    //     get_files_with_extension("../loc_sys_mount/clam/plru_medium_l2b512/traces", "bin");
-    // let traces_gz =
-    //     get_files_with_extension("../loc_sys_mount/clam/plru_medium_l2b512/traces", "gz");
-    // traces.extend(traces_gz);
-
-    // let traces = get_files_with_extension("../../loc_sys_mount/clam/plru_large/traces", "gz");
+    let traces_dir = Path::new("../../loc_sys_mount/clam/clam_medium_andrew/traces");
+    let traces = get_files_with_extension(traces_dir, "bin");
 
     if traces.is_empty() {
         log::warn!(
-            "No trace files found in ../../loc_sys_mount/clam/plru_large/traces! Check path."
+            "No trace files found in {}! Check path.",
+            traces_dir.display()
         );
+        return;
     }
 
-    let start = std::time::Instant::now(); // Start timing
+    // ── Multi-progress: one spinner row per benchmark ────────────────────────
+    let mp = MultiProgress::new();
+    let spinner_style = ProgressStyle::with_template("{spinner:.cyan} [{elapsed_precise}] {msg}")
+        .unwrap()
+        .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏", "✓"]);
+
+    let all_results: Mutex<Vec<BenchResult>> = Mutex::new(Vec::new());
+
+    let start = std::time::Instant::now();
+
     traces.par_iter().for_each(|trace| {
-        if let Err(e) = blockit_and_opt_miss_ratio(trace.into(), count_cold_as_hit) {
-            log::error!("Error processing {:?}: {}", trace, e);
+        let pb = mp.add(ProgressBar::new_spinner());
+        pb.set_style(spinner_style.clone());
+        pb.enable_steady_tick(std::time::Duration::from_millis(80));
+
+        match blockit_and_opt_miss_ratio(trace.into(), count_cold_as_hit, &pb) {
+            Ok(results) => {
+                all_results.lock().unwrap().extend(results);
+            }
+            Err(e) => {
+                pb.finish_with_message(format!(
+                    "✗ {:?}: {}",
+                    trace.file_name().unwrap_or_default(),
+                    e
+                ));
+                log::error!("Error processing {:?}: {}", trace, e);
+            }
         }
     });
-    let elapsed = start.elapsed(); // End timing
+
+    let elapsed = start.elapsed();
+
+    // Collect and sort results for a tidy summary
+    let mut results = all_results.into_inner().unwrap();
+    results.sort_by(|a, b| {
+        a.benchmark
+            .cmp(&b.benchmark)
+            .then(a.cache_size.cmp(&b.cache_size))
+    });
+
+    // ── Print summary table ──────────────────────────────────────────────────
+    println!("\n{:-<72}", "");
+    println!(
+        "{:<30} {:>10} {:>16} {:>10} {:>8}",
+        "Benchmark", "Cache", "Accesses", "Misses", "Miss%"
+    );
+    println!("{:-<72}", "");
+    for r in &results {
+        println!(
+            "{:<30} {:>10} {:>16} {:>10} {:>7.2}%",
+            r.benchmark,
+            r.cache_size,
+            r.total_accesses,
+            r.miss_count,
+            r.miss_ratio * 100.0
+        );
+    }
+    println!("{:-<72}", "");
+
+    // ── Write CSV ────────────────────────────────────────────────────────────
+    if let Err(e) = write_csv(&results, traces_dir) {
+        log::error!("Failed to write CSV: {}", e);
+    }
+
     log::info!("Total execution time: {:.2?}", elapsed);
 }

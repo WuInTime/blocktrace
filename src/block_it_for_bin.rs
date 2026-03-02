@@ -4,6 +4,7 @@ use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::PathBuf;
 
 use flate2::read::GzDecoder;
+use indicatif::ProgressBar;
 use zstd::stream::write::Encoder;
 
 use lru_sim::write_hit_trace_bin;
@@ -20,8 +21,10 @@ pub struct ProcessedTrace {
 pub fn convert(
     in_file_path: &PathBuf,
     data_path: PathBuf,
+    pb: &ProgressBar,
 ) -> Result<ProcessedTrace, Box<dyn std::error::Error>> {
-    println!("trace_path: {:?}", in_file_path);
+    // let trace_name = in_file_path.file_name().unwrap().to_str().unwrap();
+    pb.set_message("reading hit trace...");
 
     std::fs::create_dir_all(&data_path)?;
 
@@ -48,6 +51,8 @@ pub fn convert(
     }
 
     // --- PASS 2: Generate RI & Output Trace ---
+    pb.set_message("computing forward refs...");
+
     let file = File::open(in_file_path)?;
     let reader: Box<dyn Read> = if in_file_path.extension().is_some_and(|ext| ext == "gz") {
         Box::new(GzDecoder::new(file))
@@ -92,6 +97,8 @@ pub fn convert(
     drop(last_seen_index);
 
     // Write Final Output (zstd-compressed)
+    pb.set_message("writing block trace...");
+
     let file_name = if BLOCK_SIZE == 1 {
         "block_trace.bin.zst"
     } else {
@@ -114,8 +121,6 @@ pub fn convert(
 
     // Free PC vector memory
     drop(pc_accesses);
-
-    println!("Block Trace Binary Output Completed.");
 
     // Convert addresses to block tags in-place
     if BLOCK_SIZE > 1 {
