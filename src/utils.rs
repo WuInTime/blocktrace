@@ -31,7 +31,7 @@ pub fn calculate_next_cache_size(cache_size: usize, double_up: bool) -> usize {
             cache_size + 2
         } else {
             let mut target = (cache_size * 12 + 5) / 10; // Equivalent to rounding cache_size * 1.2
-            if target % 2 != 0 {
+            if !target.is_multiple_of(2) {
                 target += 1; // Ensure target is even
             }
             let next_power_of_two = (cache_size + 1).next_power_of_two();

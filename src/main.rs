@@ -1,9 +1,9 @@
 use constructive_opt::block_it_for_bin::{self, ProcessedTrace};
 use constructive_opt::opt_miss_ratio;
 use constructive_opt::utils::*;
+use rayon::prelude::*;
 use std::error::Error;
 use std::path::{Path, PathBuf};
-// use utils;
 
 fn generate_opt_miss_ratio_data(
     trace: &ProcessedTrace,
@@ -54,12 +54,19 @@ fn blockit_and_opt_miss_ratio(
 pub fn main() {
     env_logger::init(); // Initialize logger
 
+    let physical_cores = num_cpus::get_physical();
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(physical_cores)
+        .build_global()
+        .expect("Failed to build rayon thread pool");
+
     let count_cold_as_hit = false;
 
     // let data_path = "./out/clam/rit/medium/trace/3mm.csv";
     // blockit_and_opt_miss_ratio(data_path.into(), count_cold_as_hit);
 
-    let traces = get_files_with_extension("../../loc_sys_mount/clam/plru_medium_l2b512/traces", "bin");
+    let traces =
+        get_files_with_extension("../../loc_sys_mount/clam/plru_medium_l2b512/traces", "bin");
 
     // let mut traces =
     //     get_files_with_extension("../loc_sys_mount/clam/plru_medium_l2b512/traces", "bin");
@@ -76,11 +83,11 @@ pub fn main() {
     }
 
     let start = std::time::Instant::now(); // Start timing
-    for trace in &traces {
+    traces.par_iter().for_each(|trace| {
         if let Err(e) = blockit_and_opt_miss_ratio(trace.into(), count_cold_as_hit) {
             log::error!("Error processing {:?}: {}", trace, e);
         }
-    }
+    });
     let elapsed = start.elapsed(); // End timing
     log::info!("Total execution time: {:.2?}", elapsed);
 }
