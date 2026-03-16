@@ -1,0 +1,4 @@
+Need to work: 
+1. Accessing remote trace one thread at a time as the network bandwidth is limited. 
+2. show miss ratio for the csv in %. (*100)
+3. There are hit trace natively in the trace, the type is the same as the parent's patent's directory name of the trace for the first string before the first "_". e.g. "lru_512" means the hit trace is "lru" hit trace.

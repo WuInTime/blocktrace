@@ -9,8 +9,8 @@ use zstd::stream::write::Encoder;
 
 use lru_sim::write_hit_trace_bin;
 
-// const BLOCK_SIZE: u32 = 16;
-const BLOCK_SIZE: u32 = 1;
+const BLOCK_SIZE: u32 = 16;
+// const BLOCK_SIZE: u32 = 1;
 
 #[derive(Debug, Clone)]
 pub struct ProcessedTrace {
@@ -23,35 +23,10 @@ pub fn convert(
     data_path: PathBuf,
     pb: &ProgressBar,
 ) -> Result<ProcessedTrace, Box<dyn std::error::Error>> {
-    // let trace_name = in_file_path.file_name().unwrap().to_str().unwrap();
-    pb.set_message("reading hit trace...");
-
     std::fs::create_dir_all(&data_path)?;
 
-    // --- PASS 1: Generate Hit Trace & Count Accesses ---
-    {
-        let file = File::open(in_file_path)?;
-        let reader: Box<dyn Read> = if in_file_path.extension().is_some_and(|ext| ext == "gz") {
-            Box::new(GzDecoder::new(file))
-        } else {
-            Box::new(file)
-        };
-        let mut reader = BufReader::new(reader);
-        let mut buffer = [0u8; 9];
-        let mut hit_trace: Vec<bool> = Vec::new();
-
-        while reader.read_exact(&mut buffer).is_ok() {
-            let is_hit = buffer[8] != 0;
-            hit_trace.push(is_hit);
-        }
-
-        write_hit_trace_bin(&data_path, "plru_512", &hit_trace)?;
-        log::info!("Hit Trace Binary Output Completed. RAM freed.");
-        // hit_trace is dropped here, (freeing ~1GB for 1B entries)
-    }
-
-    // --- PASS 2: Generate RI & Output Trace ---
-    pb.set_message("computing forward refs...");
+    // --- Single pass: collect hit trace + pc/addr + forward refs together ---
+    pb.set_message("reading trace (single pass)…");
 
     let file = File::open(in_file_path)?;
     let reader: Box<dyn Read> = if in_file_path.extension().is_some_and(|ext| ext == "gz") {
@@ -62,6 +37,7 @@ pub fn convert(
     let mut reader = BufReader::new(reader);
     let mut buffer = [0u8; 9];
 
+    let mut hit_trace: Vec<bool> = Vec::new();
     // Accesses storage: Only (PC, Addr).
     // Clock time is implied by index. Is_hit is gone.
     // 8 bytes per entry vs 16 bytes previously => 50% RAM saving.
@@ -74,30 +50,46 @@ pub fn convert(
     while reader.read_exact(&mut buffer).is_ok() {
         let pc = u32::from_le_bytes(buffer[0..4].try_into()?);
         let addr = u32::from_le_bytes(buffer[4..8].try_into()?);
-        // we ignore is_hit in this pass
+        let is_hit = buffer[8] != 0;
 
         let block_tag = if BLOCK_SIZE > 1 {
             addr / BLOCK_SIZE
         } else {
             addr
         };
-        let curr_idx: usize = addr_accesses.len();
+        let curr_idx = addr_accesses.len();
 
         if let Some(prev_idx) = last_seen_index.insert(block_tag, curr_idx) {
-            let dist = (curr_idx as i32) - (prev_idx as i32);
-            forward_ri[prev_idx] = dist;
+            forward_ri[prev_idx] = (curr_idx as i32) - (prev_idx as i32);
         }
 
+        hit_trace.push(is_hit);
         pc_accesses.push(pc as u16);
         addr_accesses.push(addr);
         forward_ri.push(i32::MAX);
     }
 
-    // Drop the map to free RAM
+    // Drop the forward-ref lookup map to free RAM
     drop(last_seen_index);
 
-    // Write Final Output (zstd-compressed)
-    pb.set_message("writing block trace...");
+    // // Derive hit trace type from grandparent directory name (e.g. "plru_512" -> "plru")
+    // let hit_trace_type = in_file_path
+    //     .parent() // parent dir (e.g. ".../plru_512/")
+    //     .and_then(|p| p.parent()) // grandparent dir (e.g. ".../traces/plru_512/")
+    //     .and_then(|p| p.file_name())
+    //     .and_then(|n| n.to_str())
+    //     .and_then(|n| n.split('_').next())
+    //     .unwrap_or("unknown");
+
+    let hit_trace_type = "hardware_000";
+
+    // Write native hit trace, then free its RAM (~1 GB for 1 B entries)
+    write_hit_trace_bin(&data_path, hit_trace_type, &hit_trace)?;
+    log::info!("Hit Trace Binary Output Completed. RAM freed.");
+    drop(hit_trace);
+
+    // --- Write block trace (zstd-compressed) --------------------------------
+    pb.set_message("writing block trace…");
 
     let file_name = if BLOCK_SIZE == 1 {
         "block_trace.bin.zst"
@@ -107,7 +99,7 @@ pub fn convert(
     let output_path = data_path.join(file_name);
     let file = File::create(&output_path)?;
     let buf_writer = BufWriter::new(file);
-    let mut writer = Encoder::new(buf_writer, 0)?; // 0 = zstd default level which is 3
+    let mut writer = Encoder::new(buf_writer, 0)?; // 0 = zstd default level (3)
 
     for (i, (&pc, &addr)) in pc_accesses.iter().zip(addr_accesses.iter()).enumerate() {
         let mut buffer = [0u8; 12];
@@ -117,9 +109,8 @@ pub fn convert(
         writer.write_all(&buffer)?;
     }
     writer.flush()?;
-    writer.finish()?; // Finalize zstd stream
+    writer.finish()?;
 
-    // Free PC vector memory
     drop(pc_accesses);
 
     // Convert addresses to block tags in-place
