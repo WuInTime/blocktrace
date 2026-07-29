@@ -1,5 +1,11 @@
 # Project Updates
 
+## 2026-03-16: Hit trace naming and debug cleanup
+
+- **Change**: Derive `hit_trace_type` from the trace file's grandparent directory. Names like `plru_b512` or `clam_b128_medium_andrew` are now mapped to `plru_512` and `clam_128` respectively.
+- **Change**: modified the block it for bin so that it only do one pass.
+- **Files**: `src/block_it_for_bin.rs`
+
 ## 2026-02-18: RAM and IO Optimizations for Trace Processing
 
 ### 1. RAM Optimization: Split Vectors

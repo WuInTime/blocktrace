@@ -23,7 +23,10 @@ fn generate_opt_miss_ratio_data(
     pb: &ProgressBar,
     bench_name: &str,
 ) -> Result<Vec<BenchResult>, Box<dyn Error>> {
-    let cache_sizes = [128, 512];
+    // let cache_sizes = [128, 512];
+    // i want to scan through the cache sizes from 16 to 10000 and skip the ones that's not divisible by 16
+    let cache_sizes: Vec<usize> = (16..=10000).step_by(16).collect();
+
     let mut results = Vec::new();
 
     for &cache_size in &cache_sizes {
@@ -36,8 +39,9 @@ fn generate_opt_miss_ratio_data(
             count_cold_as_hit,
         );
 
-        let col_name = format!("OPT_{}", cache_size);
-        write_hit_trace_bin(data_path, &col_name, &miss_result.hit_trace)?;
+        // uncomment to store the hit trace for each cache size
+        // let col_name = format!("OPT_{}", cache_size);
+        // write_hit_trace_bin(data_path, &col_name, &miss_result.hit_trace)?;
 
         pb.set_message(format!(
             "{} — OPT_{}: {} misses ({:.2}%)",
@@ -160,7 +164,8 @@ pub fn main() {
     let count_cold_as_hit = false;
 
     // let traces_dir = Path::new("../../loc_sys_mount/clam/test/traces");
-    let traces_dir = Path::new("../../loc_sys_mount/clam_b128_medium_andrew/traces");
+    // let traces_dir = Path::new("../../loc_sys_mount/l2_block/plru_b512_regl_small/traces");
+    let traces_dir = Path::new("../../loc_sys_mount/shuang_zhai/gemv2t/traces");
     let traces = get_files_with_extension(traces_dir, "bin");
 
     if traces.is_empty() {

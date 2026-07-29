@@ -72,24 +72,39 @@ pub fn convert(
     // Drop the forward-ref lookup map to free RAM
     drop(last_seen_index);
 
-    // // Derive hit trace type from grandparent directory name (e.g. "plru_512" -> "plru")
-    // let hit_trace_type = in_file_path
-    //     .parent() // parent dir (e.g. ".../plru_512/")
-    //     .and_then(|p| p.parent()) // grandparent dir (e.g. ".../traces/plru_512/")
-    //     .and_then(|p| p.file_name())
-    //     .and_then(|n| n.to_str())
-    //     .and_then(|n| n.split('_').next())
-    //     .unwrap_or("unknown");
+    // Derive hit trace type from grandparent directory name (e.g. "plru_b512_medium" -> "plru_512")
+    let hit_trace_type = in_file_path
+        .parent() // parent dir (e.g. ".../plru_b512/")
+        .and_then(|p| p.parent()) // grandparent dir (e.g. ".../traces/plru_b512/")
+        .and_then(|p| p.file_name())
+        .and_then(|n| n.to_str())
+        .map(|n| {
+            if let Some(idx) = n.find("_b") {
+                let after = &n[idx + 2..];
+                let digits: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
+                if !digits.is_empty() {
+                    // format!("{}_{}", &n[..idx], digits)
+                    format!("hardware_{}", digits)
+                } else {
+                    n.to_string()
+                }
+            } else {
+                n.to_string()
+            }
+        })
+        .unwrap_or_else(|| "hardware_000".to_string());
 
-    let hit_trace_type = "hardware_000";
+    // println!("hit trace type: {}", hit_trace_type);
+    // // exit program;
+    // std::process::exit(0);
 
     // Write native hit trace, then free its RAM (~1 GB for 1 B entries)
-    write_hit_trace_bin(&data_path, hit_trace_type, &hit_trace)?;
+    write_hit_trace_bin(&data_path, hit_trace_type.as_str(), &hit_trace)?;
     log::info!("Hit Trace Binary Output Completed. RAM freed.");
     drop(hit_trace);
 
     // --- Write block trace (zstd-compressed) --------------------------------
-    pb.set_message("writing block trace…");
+    pb.set_message("writing {block/word}_trace.bin.zst…");
 
     let file_name = if BLOCK_SIZE == 1 {
         "block_trace.bin.zst"
