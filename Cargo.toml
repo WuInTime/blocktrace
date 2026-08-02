@@ -4,14 +4,15 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-lru_sim = { git = "https://github.com/YanghuiWu/lru_sim.git" }
+# lru_sim = { git = "https://github.com/YanghuiWu/lru_sim.git" }
 serde = { version = "1.0.210", features = ["derive"] }
 csv = "1.3.0"
-rand = "0.10.0"
+rand = "0.10.2"
 indicatif = "0.18.3"
 log = "0.4.22"
 flate2 = "1.1.2"
 zstd = "0.13.3"
+xz2 = "0.1.7"
 env_logger = "0.11.3"
 bitvec = "1.0.1"
 rayon = "1.10"

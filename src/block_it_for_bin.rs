@@ -7,7 +7,7 @@ use flate2::read::GzDecoder;
 use indicatif::ProgressBar;
 use zstd::stream::write::Encoder;
 
-use lru_sim::write_hit_trace_bin;
+// use lru_sim::write_hit_trace_bin;
 
 const BLOCK_SIZE: u32 = 16;
 // const BLOCK_SIZE: u32 = 1;
@@ -41,8 +41,8 @@ pub fn convert(
     // Accesses storage: Only (PC, Addr).
     // Clock time is implied by index. Is_hit is gone.
     // 8 bytes per entry vs 16 bytes previously => 50% RAM saving.
-    // Optimization: separate vectors for u16 PC and u32 Addr saves 2 bytes per entry (6 bytes vs 8 bytes).
-    let mut pc_accesses: Vec<u16> = Vec::new();
+    // Keep the complete PC so the phase marker in the top byte survives conversion.
+    let mut pc_accesses: Vec<u32> = Vec::new();
     let mut addr_accesses: Vec<u32> = Vec::new();
     let mut forward_ri: Vec<i32> = Vec::new();
     let mut last_seen_index: HashMap<u32, usize> = HashMap::new();
@@ -64,7 +64,7 @@ pub fn convert(
         }
 
         hit_trace.push(is_hit);
-        pc_accesses.push(pc as u16);
+        pc_accesses.push(pc);
         addr_accesses.push(addr);
         forward_ri.push(i32::MAX);
     }
@@ -73,7 +73,7 @@ pub fn convert(
     drop(last_seen_index);
 
     // Derive hit trace type from grandparent directory name (e.g. "plru_b512_medium" -> "plru_512")
-    let hit_trace_type = in_file_path
+    let _hit_trace_type = in_file_path
         .parent() // parent dir (e.g. ".../plru_b512/")
         .and_then(|p| p.parent()) // grandparent dir (e.g. ".../traces/plru_b512/")
         .and_then(|p| p.file_name())
@@ -94,12 +94,12 @@ pub fn convert(
         })
         .unwrap_or_else(|| "hardware_000".to_string());
 
-    // println!("hit trace type: {}", hit_trace_type);
+    // println!("hit trace type: {}", _hit_trace_type);
     // // exit program;
     // std::process::exit(0);
 
     // Write native hit trace, then free its RAM (~1 GB for 1 B entries)
-    write_hit_trace_bin(&data_path, hit_trace_type.as_str(), &hit_trace)?;
+    // write_hit_trace_bin(&data_path, _hit_trace_type.as_str(), &hit_trace)?;
     log::info!("Hit Trace Binary Output Completed. RAM freed.");
     drop(hit_trace);
 
@@ -118,7 +118,7 @@ pub fn convert(
 
     for (i, (&pc, &addr)) in pc_accesses.iter().zip(addr_accesses.iter()).enumerate() {
         let mut buffer = [0u8; 12];
-        buffer[0..4].copy_from_slice(&(pc as u32).to_le_bytes());
+        buffer[0..4].copy_from_slice(&pc.to_le_bytes());
         buffer[4..8].copy_from_slice(&forward_ri[i].to_le_bytes());
         buffer[8..12].copy_from_slice(&addr.to_le_bytes());
         writer.write_all(&buffer)?;

@@ -6,6 +6,52 @@ use std::fs::{self, File};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TraceFormat {
+    LegacyBinary,
+    ChampSim,
+}
+
+fn is_champsim_trace(path: &Path) -> bool {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("");
+    name.ends_with(".champsimtrace") || name.ends_with(".champsimtrace.xz")
+}
+
+fn is_legacy_binary_trace(path: &Path) -> bool {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("");
+    name.ends_with(".bin") || name.ends_with(".bin.gz")
+}
+
+pub fn discover_traces(
+    directory: impl AsRef<Path>,
+) -> std::io::Result<(TraceFormat, Vec<PathBuf>)> {
+    let mut files: Vec<_> = fs::read_dir(directory)?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_file())
+        .collect();
+    files.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+
+    if files.is_empty() {
+        return Ok((TraceFormat::LegacyBinary, files));
+    }
+    if files.iter().all(|path| is_champsim_trace(path)) {
+        return Ok((TraceFormat::ChampSim, files));
+    }
+
+    let legacy = files
+        .into_iter()
+        .filter(|path| is_legacy_binary_trace(path))
+        .collect();
+    Ok((TraceFormat::LegacyBinary, legacy))
+}
+
 pub fn read_third_column_as_usize_vec(file_path: &str) -> Result<Vec<usize>, Box<dyn Error>> {
     let file = File::open(file_path)?;
     let mut rdr = ReaderBuilder::new().has_headers(true).from_reader(file);

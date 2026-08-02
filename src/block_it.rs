@@ -1,6 +1,6 @@
 use csv::ReaderBuilder;
 use csv::Writer;
-use lru_sim::update_hit_miss_csv;
+// use lru_sim::update_hit_miss_csv;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs::{File, create_dir_all};
@@ -67,7 +67,7 @@ pub fn convert(in_file_path: PathBuf, data_path: PathBuf) -> Result<Vec<usize>, 
         clock_time += 1;
     }
 
-    update_hit_miss_csv(&data_path, "PLRU_64", &hit_trace)?;
+    // update_hit_miss_csv(&data_path, "PLRU_64", &hit_trace)?;
     wtr.flush()?;
     println!("Block Trace Completed.");
     // read_third_column_as_usize_vec(&output_path.to_str().unwrap())

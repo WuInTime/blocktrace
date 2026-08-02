@@ -23,6 +23,19 @@ Trace files must be compressed with `zstd`.
 
 The simulator opens the file as zstd-compressed data and reads the decompressed byte stream.
 
+## ChampSim Input
+
+The main executable also accepts a directory containing only raw
+`.champsimtrace` and/or xz-compressed `.champsimtrace.xz` files. Each
+little-endian instruction record is 64 bytes: an 8-byte PC, two branch bytes,
+two destination-register bytes, four source-register bytes, two destination
+memory addresses, and four source memory addresses.
+
+Zero memory operands and instructions with no memory operands are skipped.
+Nonzero source operands emit reads before nonzero destination operands emit
+writes, with slot order preserved. Byte addresses are converted to 64-byte
+cache-line addresses.
+
 ## Binary Record Layout
 
 The decompressed trace is a sequence of fixed-size records.
@@ -108,4 +121,3 @@ The output hit trace is bit-packed, MSB-first:
 
 - `1` means cache hit
 - `0` means cache miss
-

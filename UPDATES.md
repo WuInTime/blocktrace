@@ -1,5 +1,17 @@
 # Project Updates
 
+## 2026-08-02: ChampSim Trace Support
+
+- **Change**: Added automatic trace-format detection. When every regular file in the input directory is a `.champsimtrace` or `.champsimtrace.xz` file, the directory is processed as ChampSim input; existing `.bin` and `.bin.gz` inputs continue to use the legacy reader.
+- **Change**: Added a streaming reader for raw and xz-compressed 64-byte, little-endian ChampSim instruction records.
+- **Change**: Skip register-only instructions and convert every nonzero memory operand into a simulator access. Source-memory operands emit reads before destination-memory operands emit writes, with slot order preserved within each group.
+- **Change**: Convert ChampSim byte addresses to 64-byte cache-line addresses, calculate forward reuse intervals, and write `block_trace.bin.zst` output for the existing OPT pipeline.
+- **Change**: Reject incomplete ChampSim records instead of silently dropping a partial final record.
+- **Change**: Accept an optional trace-directory command-line argument and default to the PolyBench ChampSim trace directory.
+- **Change**: Preserve the complete 32-bit PC in the legacy binary converter so its top-byte phase marker is not discarded during conversion.
+- **Tests**: Added coverage for raw and xz-compressed input, register-only filtering, multiple operand slots, read-before-write ordering, and incomplete records.
+- **Files**: `src/champsim.rs`, `src/utils.rs`, `src/main.rs`, `src/lib.rs`, `src/block_it_for_bin.rs`, `Cargo.toml`, `README.md`, `src/TRACE_FORMAT.md`, and `read.py`.
+
 ## 2026-03-16: Hit trace naming and debug cleanup
 
 - **Change**: Derive `hit_trace_type` from the trace file's grandparent directory. Names like `plru_b512` or `clam_b128_medium_andrew` are now mapped to `plru_512` and `clam_128` respectively.
@@ -30,4 +42,4 @@
 
 ## Planned Updates
 
-- **Single-Pass Processing**: Merge Pass 1 (Hit Trace) and Pass 2 (Block Trace) to reduce IO and decompression overhead by 50%.
+- **Phase metadata for ChampSim traces**: Traditional `.bin.zst` traces reserve the most-significant byte of the 32-bit PC field for the phase ID, leaving the remaining three bytes for the PC. ChampSim records instead contain a complete 64-bit PC and no phase ID. A future fix must define how phase IDs are assigned and stored for ChampSim-derived traces without interpreting part of the real PC as phase metadata or truncating the PC.

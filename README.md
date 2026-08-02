@@ -21,11 +21,18 @@ If you want word-address input instead, set `BLOCK_SIZE` to the number of words 
 
 ## Run
 
-Build and run with release optimizations:
+Build and run with release optimizations. The optional argument is the trace
+directory; it defaults to the PolyBench ChampSim trace directory.
 
 ```bash
 cargo run -r
+cargo run -r -- /path/to/traces
 ```
+
+When every regular file in the directory ends in `.champsimtrace` or
+`.champsimtrace.xz`, the input is decoded as 64-byte ChampSim instruction
+records. Raw and xz-compressed traces are supported. Memory operands become
+64-byte cache-line accesses; register-only instructions are skipped.
 
 The program prints a miss-ratio summary table and writes output files under each benchmark result directory.
 

@@ -1,5 +1,6 @@
 pub mod block_it;
 pub mod block_it_for_bin;
+pub mod champsim;
 pub mod utils;
 
 use log::debug;
