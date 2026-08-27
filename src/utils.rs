@@ -102,6 +102,7 @@ pub fn create_progress_bar(max_cache_size: usize) -> ProgressBar {
 }
 
 pub fn write_hit_trace_bin(dir: &Path, file_name: &str, hits: &[bool]) -> std::io::Result<()> {
+    fs::create_dir_all(dir)?;
     let path = dir.join(format!("hit_trace_{}.bin", file_name));
     let mut writer = BufWriter::new(File::create(path)?);
 

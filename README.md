@@ -7,17 +7,22 @@ Constructive OPT cache analysis utilities for processing traces and computing OP
 - Reads input traces.
 - Builds block-tag and forward-reference sequences.
 - Computes OPT miss ratio for configured cache sizes.
-- Writes per-size hit traces and a summary CSV.
+- Writes a summary CSV and, when requested, per-size hit traces.
 
-## Current Default Address Semantics
+## Address Semantics
 
-The main executable currently treats input addresses as block addresses by default.
+Legacy `.bin` input addresses are interpreted using `--elements-per-block`,
+which defaults to `1`.
 
-- In `src/main.rs`, execution goes through `block_it_for_bin::convert(...)`.
-- In `src/block_it_for_bin.rs`, `BLOCK_SIZE` is set to `1`.
-- With `BLOCK_SIZE == 1`, addresses are used directly as block tags (no shift/divide).
+- `--elements-per-block 1` means one element has the same size as one cache
+  block. Equivalently, the input address is already a block tag, so it is used
+  directly.
+- For word-addressed input with 16 words per cache block, use
+  `--elements-per-block 16`. Each input address is then divided by 16 to obtain
+  its block tag.
 
-If you want word-address input instead, set `BLOCK_SIZE` to the number of words per block (for example `16`) in `src/block_it_for_bin.rs`.
+ChampSim inputs retain their native 64-byte cache-line interpretation; this
+option only affects legacy `.bin` traces.
 
 ## Run
 
@@ -27,7 +32,15 @@ directory; it defaults to the PolyBench ChampSim trace directory.
 ```bash
 cargo run -r
 cargo run -r -- /path/to/traces
+cargo run -r -- /path/to/traces --elements-per-block 16
+cargo run -r -- /path/to/traces --elements-per-block 16 --write-hit-trace-bin
+cargo run -r -- /path/to/traces --write-hit-trace-bin
 ```
+
+Hit traces are disabled by default. `--write-hit-trace-bin` writes packed OPT
+hit traces (one bit per access) under each benchmark's `hit_traces/` directory.
+For legacy input, it also stores the native hit trace embedded in the source
+trace in the benchmark result directory.
 
 When every regular file in the directory ends in `.champsimtrace` or
 `.champsimtrace.xz`, the input is decoded as 64-byte ChampSim instruction

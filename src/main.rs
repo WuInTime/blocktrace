@@ -1,3 +1,4 @@
+use clap::Parser;
 use constructive_opt::block_it_for_bin::{self, ProcessedTrace};
 use constructive_opt::champsim;
 use constructive_opt::opt_miss_ratio;
@@ -5,8 +6,36 @@ use constructive_opt::utils::*;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use std::error::Error;
+use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
+
+#[derive(Debug, Parser)]
+#[command(
+    version,
+    about = "Compute OPT cache miss ratios from legacy binary or ChampSim traces"
+)]
+struct Cli {
+    /// Directory containing the input traces.
+    #[arg(default_value = "../../loc_sys_mount/pin_polybench/traces")]
+    traces_dir: PathBuf,
+
+    /// Write packed binary hit traces (one bit per access).
+    ///
+    /// This writes each OPT hit trace under `hit_traces/`. For legacy binary
+    /// inputs, it also writes the native hit trace embedded in the input.
+    #[arg(long)]
+    write_hit_trace_bin: bool,
+
+    /// Number of addressable elements in one cache block for legacy `.bin` traces.
+    ///
+    /// Addresses are divided by this value to obtain block tags. A value of 1
+    /// means that an element is the same size as a cache block, or equivalently
+    /// that each input address is already a block tag. ChampSim traces always
+    /// use their native 64-byte cache-line size.
+    #[arg(long, default_value_t = NonZeroU32::new(1).unwrap(), value_name = "N")]
+    elements_per_block: NonZeroU32,
+}
 
 // One row of results per (benchmark × cache_size)
 struct BenchResult {
@@ -19,14 +48,16 @@ struct BenchResult {
 
 fn generate_opt_miss_ratio_data(
     trace: &ProcessedTrace,
-    _data_path: &Path,
+    data_path: &Path,
     count_cold_as_hit: bool,
+    write_hit_trace: bool,
     pb: &ProgressBar,
     bench_name: &str,
 ) -> Result<Vec<BenchResult>, Box<dyn Error>> {
-    let cache_sizes = [128, 512];
+    // let cache_sizes = [128, 512];
+    // let cache_sizes = [32768, 49152, 65536, 131072, 204800, 262_144, 327_689]; // For GPU l2, 4mb, 6mb, 12mb,16mb, 20mb, 32mb, 40mb
     // i want to scan through the cache sizes from 16 to 10000 and skip the ones that's not divisible by 16
-    // let cache_sizes: Vec<usize> = (16..=10000).step_by(16).collect();
+    let cache_sizes: Vec<usize> = (32..=4096).step_by(32).collect();
 
     let mut results = Vec::new();
 
@@ -39,10 +70,11 @@ fn generate_opt_miss_ratio_data(
             cache_size,
             count_cold_as_hit,
         );
-
-        // uncomment to store the hit trace for each cache size
-        // let col_name = format!("OPT_{}", cache_size);
-        // write_hit_trace_bin(data_path, &col_name, &miss_result.hit_trace)?;
+        if write_hit_trace {
+            let hit_trace_path = data_path.join("hit_traces");
+            let trace_name = format!("OPT_{}", cache_size);
+            write_hit_trace_bin(&hit_trace_path, &trace_name, &miss_result.hit_trace)?;
+        }
 
         pb.set_message(format!(
             "{} — OPT_{}: {} misses ({:.2}%)",
@@ -70,6 +102,8 @@ fn blockit_and_opt_miss_ratio(
     data_path: PathBuf,
     trace_format: TraceFormat,
     count_cold_as_hit: bool,
+    elements_per_block: u32,
+    write_hit_trace: bool,
     pb: &ProgressBar,
     // Counting semaphore: at most IO_CONCURRENCY threads read from the
     // remote drive simultaneously to avoid saturating network bandwidth.
@@ -107,9 +141,13 @@ fn blockit_and_opt_miss_ratio(
 
         pb.set_message(format!("{} — reading remote trace…", bench_name));
         let result = match trace_format {
-            TraceFormat::LegacyBinary => {
-                block_it_for_bin::convert(&data_path, bench_result_dir.clone(), pb)
-            }
+            TraceFormat::LegacyBinary => block_it_for_bin::convert(
+                &data_path,
+                bench_result_dir.clone(),
+                elements_per_block,
+                write_hit_trace,
+                pb,
+            ),
             TraceFormat::ChampSim => champsim::convert(&data_path, &bench_result_dir, pb),
         };
 
@@ -125,6 +163,7 @@ fn blockit_and_opt_miss_ratio(
         &trace,
         &bench_result_dir,
         count_cold_as_hit,
+        write_hit_trace,
         pb,
         &bench_name,
     )?;
@@ -166,6 +205,7 @@ fn write_csv(results: &[BenchResult], traces_dir: &Path) -> Result<(), Box<dyn E
 
 pub fn main() {
     env_logger::init();
+    let cli = Cli::parse();
 
     // let parallelism = num_cpus::get_physical() / 2;
     let parallelism = 3;
@@ -176,10 +216,7 @@ pub fn main() {
 
     let count_cold_as_hit = false;
 
-    let traces_dir = std::env::args_os()
-        .nth(1)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("../../loc_sys_mount/pin_polybench/traces"));
+    let traces_dir = cli.traces_dir;
     let (trace_format, traces) = match discover_traces(&traces_dir) {
         Ok(discovered) => discovered,
         Err(error) => {
@@ -221,6 +258,8 @@ pub fn main() {
             trace.into(),
             trace_format,
             count_cold_as_hit,
+            cli.elements_per_block.get(),
+            cli.write_hit_trace_bin,
             &pb,
             &io_sem,
         ) {
