@@ -40,7 +40,7 @@ struct Cli {
 // One row of results per (benchmark × cache_size)
 struct BenchResult {
     benchmark: String,
-    cache_size: usize,
+    block_count: usize,
     total_accesses: usize,
     miss_count: usize,
     miss_ratio: f64,
@@ -54,39 +54,39 @@ fn generate_opt_miss_ratio_data(
     pb: &ProgressBar,
     bench_name: &str,
 ) -> Result<Vec<BenchResult>, Box<dyn Error>> {
-    // let cache_sizes = [128, 512];
-    // let cache_sizes = [32768, 49152, 65536, 131072, 204800, 262_144, 327_689]; // For GPU l2, 4mb, 6mb, 12mb,16mb, 20mb, 32mb, 40mb
+    // let block_counts = [128, 512];
+    // let block_counts = [32768, 49152, 65536, 131072, 204800, 262_144, 327_689]; // For GPU l2, 4mb, 6mb, 12mb,16mb, 20mb, 32mb, 40mb
     // i want to scan through the cache sizes from 16 to 10000 and skip the ones that's not divisible by 16
-    let cache_sizes: Vec<usize> = (32..=4096).step_by(32).collect();
+    let block_counts: Vec<usize> = (32..=4096).step_by(32).collect();
 
     let mut results = Vec::new();
 
-    for &cache_size in &cache_sizes {
-        pb.set_message(format!("{} — OPT_{cache_size}: running…", bench_name));
+    for &block_count in &block_counts {
+        pb.set_message(format!("{} — OPT_{block_count}: running…", bench_name));
 
         let miss_result = opt_miss_ratio(
             &trace.block_tags,
             &trace.forward_refs,
-            cache_size,
+            block_count,
             count_cold_as_hit,
         );
         if write_hit_trace {
             let hit_trace_path = data_path.join("hit_traces");
-            let trace_name = format!("OPT_{}", cache_size);
+            let trace_name = format!("OPT_{}", block_count);
             write_hit_trace_bin(&hit_trace_path, &trace_name, &miss_result.hit_trace)?;
         }
 
         pb.set_message(format!(
             "{} — OPT_{}: {} misses ({:.2}%)",
             bench_name,
-            cache_size,
+            block_count,
             miss_result.miss_count,
             miss_result.miss_ratio * 100.0
         ));
 
         results.push(BenchResult {
             benchmark: bench_name.to_string(),
-            cache_size,
+            block_count,
             total_accesses: miss_result.cache_accesses,
             miss_count: miss_result.miss_count,
             miss_ratio: miss_result.miss_ratio * 100.0,
@@ -182,7 +182,7 @@ fn write_csv(results: &[BenchResult], traces_dir: &Path) -> Result<(), Box<dyn E
     let mut wtr = csv::Writer::from_path(&out_path)?;
     wtr.write_record([
         "benchmark",
-        "cache_size",
+        "blocks_num",
         "total_accesses",
         "miss_count",
         "miss_ratio",
@@ -191,7 +191,7 @@ fn write_csv(results: &[BenchResult], traces_dir: &Path) -> Result<(), Box<dyn E
     for r in results {
         wtr.write_record(&[
             r.benchmark.clone(),
-            r.cache_size.to_string(),
+            r.block_count.to_string(),
             r.total_accesses.to_string(),
             r.miss_count.to_string(),
             format!("{:.6}", r.miss_ratio),
@@ -284,7 +284,7 @@ pub fn main() {
     results.sort_by(|a, b| {
         a.benchmark
             .cmp(&b.benchmark)
-            .then(a.cache_size.cmp(&b.cache_size))
+            .then(a.block_count.cmp(&b.block_count))
     });
 
     // ── Print summary table ──────────────────────────────────────────────────
@@ -297,7 +297,7 @@ pub fn main() {
     for r in &results {
         println!(
             "{:<20} {:>10} {:>16} {:>10} {:>7.2}%",
-            r.benchmark, r.cache_size, r.total_accesses, r.miss_count, r.miss_ratio
+            r.benchmark, r.block_count, r.total_accesses, r.miss_count, r.miss_ratio
         );
     }
     println!("{:-<72}", "");

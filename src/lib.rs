@@ -21,7 +21,7 @@ pub struct OptMissRatioResult {
 pub fn opt_miss_ratio(
     block_tags: &[u32],
     forward_refs: &[i32],
-    cache_size: usize,
+    block_count: usize,
     count_cold_as_hit: bool,
 ) -> OptMissRatioResult {
     assert_eq!(block_tags.len(), forward_refs.len());
@@ -58,7 +58,7 @@ pub fn opt_miss_ratio(
                 cache_misses += 1;
             }
 
-            if cache_map.len() == cache_size {
+            if cache_map.len() == block_count {
                 // Evict element with furthest next use
                 if let Some(evict_entry) = reckoning.iter().next().cloned() {
                     let (_, evict_tag) = evict_entry;
@@ -82,7 +82,7 @@ pub fn opt_miss_ratio(
 /// Generic version of the OPT miss ratio calculation
 pub fn _opt_miss_ratio_for_any<T: PartialEq + Eq + Clone + Hash + Ord + Copy + std::fmt::Debug>(
     trace: &[T],
-    cache_size: usize,
+    block_count: usize,
     count_cold_as_hit: bool,
 ) -> OptMissRatioResult {
     let cache_accesses: usize = trace.len();
@@ -130,7 +130,7 @@ pub fn _opt_miss_ratio_for_any<T: PartialEq + Eq + Clone + Hash + Ord + Copy + s
             }
             // reckoning.insert((Reverse(next_time.unwrap_or(usize::MAX)), element.clone()));
 
-            if cache_map.len() == cache_size {
+            if cache_map.len() == block_count {
                 // Evict element with the furthest next use
                 let evict_entry = *reckoning.iter().next().unwrap();
                 let (_, evict_element) = evict_entry;
@@ -158,7 +158,7 @@ pub fn _opt_miss_ratio_for_any<T: PartialEq + Eq + Clone + Hash + Ord + Copy + s
     }
 }
 
-pub fn opt_stack_miss_ratio(block_tags: &[u32], cache_size: usize) -> OptMissRatioResult {
+pub fn opt_stack_miss_ratio(block_tags: &[u32], block_count: usize) -> OptMissRatioResult {
     let mut stack: VecDeque<u32> = VecDeque::new();
     let mut histogram: HashMap<usize, usize> = HashMap::new();
     let mut hit_trace = vec![false; block_tags.len()];
@@ -167,7 +167,7 @@ pub fn opt_stack_miss_ratio(block_tags: &[u32], cache_size: usize) -> OptMissRat
         if let Some(pos) = stack.iter().position(|&x| x == tag) {
             // Seen before (reuse)
             *histogram.entry(pos).or_insert(0) += 1;
-            hit_trace[i] = pos < cache_size;
+            hit_trace[i] = pos < block_count;
             stack.remove(pos);
         } else {
             // Cold miss
@@ -180,7 +180,7 @@ pub fn opt_stack_miss_ratio(block_tags: &[u32], cache_size: usize) -> OptMissRat
     let total_accesses = block_tags.len();
     let mut total_misses = 0;
     for (dist, count) in &histogram {
-        if *dist > cache_size {
+        if *dist > block_count {
             total_misses += *count;
         }
     }

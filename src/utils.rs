@@ -67,20 +67,20 @@ pub fn read_third_column_as_usize_vec(file_path: &str) -> Result<Vec<usize>, Box
 }
 
 #[allow(dead_code)]
-pub fn calculate_next_cache_size(cache_size: usize, double_up: bool) -> usize {
+pub fn calculate_next_cache_size(block_count: usize, double_up: bool) -> usize {
     if double_up {
-        cache_size * 2
+        block_count * 2
     } else {
-        if cache_size == 1 {
+        if block_count == 1 {
             2
-        } else if cache_size < 34 {
-            cache_size + 2
+        } else if block_count < 34 {
+            block_count + 2
         } else {
-            let mut target = (cache_size * 12 + 5) / 10; // Equivalent to rounding cache_size * 1.2
+            let mut target = (block_count * 12 + 5) / 10; // Equivalent to rounding cache_size * 1.2
             if !target.is_multiple_of(2) {
                 target += 1; // Ensure target is even
             }
-            let next_power_of_two = (cache_size + 1).next_power_of_two();
+            let next_power_of_two = (block_count + 1).next_power_of_two();
             if target < next_power_of_two {
                 target
             } else {
