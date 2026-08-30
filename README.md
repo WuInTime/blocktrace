@@ -1,55 +1,58 @@
-# constructive_opt
+# blocktrace
 
-Constructive OPT cache analysis utilities for processing traces and computing OPT miss ratios.
+`blocktrace` normalizes memory traces into cache-block accesses and computes
+the forward distance to the next access of each block. The generated trace can
+be shared by cache simulators, lease simulators, and miss-ratio tools.
 
-## What This Project Does
+Supported input formats:
 
-- Reads input traces.
-- Builds block-tag and forward-reference sequences.
-- Computes OPT miss ratio for configured cache sizes.
-- Writes a summary CSV and, when requested, per-size hit traces.
+- Legacy 9-byte binary records, raw or gzip-compressed
+- ChampSim 64-byte instruction records, raw or xz-compressed
 
-## Address Semantics
+Every conversion writes a canonical `block_trace.bin.zst`; addresses in that
+file are already block tags. See [FORMAT.md](FORMAT.md) for the record layout.
 
-Legacy `.bin` input addresses are interpreted using `--elements-per-block`,
-which defaults to `1`.
-
-- `--elements-per-block 1` means one element has the same size as one cache
-  block. Equivalently, the input address is already a block tag, so it is used
-  directly.
-- For word-addressed input with 16 words per cache block, use
-  `--elements-per-block 16`. Each input address is then divided by 16 to obtain
-  its block tag.
-
-ChampSim inputs retain their native 64-byte cache-line interpretation; this
-option only affects legacy `.bin` traces.
-
-## Run
-
-Build and run with release optimizations. The optional argument is the trace
-directory; it defaults to the PolyBench ChampSim trace directory.
+## Command line
 
 ```bash
-cargo run -r
-cargo run -r -- /path/to/traces
-cargo run -r -- /path/to/traces --elements-per-block 16
-cargo run -r -- /path/to/traces --elements-per-block 16 --write-hit-trace-bin
-cargo run -r -- /path/to/traces --write-hit-trace-bin
+cargo run --release -- trace.bin.gz \
+  --elements-per-block 16 \
+  --output-directory results
+
+cargo run --release -- trace.champsimtrace.xz \
+  --output-directory results
 ```
 
-Hit traces are disabled by default. `--write-hit-trace-bin` writes packed OPT
-hit traces (one bit per access) under each benchmark's `hit_traces/` directory.
-For legacy input, it also stores the native hit trace embedded in the source
-trace in the benchmark result directory.
+The input format is inferred from the filename. Override it with
+`--format legacy-bin` or `--format champsim` when necessary.
 
-When every regular file in the directory ends in `.champsimtrace` or
-`.champsimtrace.xz`, the input is decoded as 64-byte ChampSim instruction
-records. Raw and xz-compressed traces are supported. Memory operands become
-64-byte cache-line accesses; register-only instructions are skipped.
+For legacy input, `--write-native-hit-trace` also writes the packed hit bits
+embedded in the source trace.
 
-The program prints a miss-ratio summary table and writes output files under each benchmark result directory.
+## Rust library
 
-## Notes
+```rust
+use blocktrace::{ConvertOptions, TraceFormat, convert};
 
-- Trace format details are documented in `src/TRACE_FORMAT.md`.
-- The currently selected trace root path is configured in `src/main.rs`.
+let trace = convert(
+    "trace.bin.gz",
+    "results",
+    TraceFormat::LegacyBinary,
+    ConvertOptions {
+        elements_per_block: std::num::NonZeroU32::new(16).unwrap(),
+        write_native_hit_trace: false,
+    },
+)?;
+
+println!("{} cache accesses", trace.len());
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+`BlockTrace::read_zstd` reads an existing normalized trace without decoding
+the original input again.
+
+## History
+
+This project was extracted from `constructive_opt`, now named
+[`belady-mrc`](https://github.com/WuInTime/belady-mrc). The original Git
+history is intentionally retained.

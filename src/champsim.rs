@@ -1,11 +1,9 @@
-use crate::block_it_for_bin::ProcessedTrace;
-use indicatif::ProgressBar;
+use crate::{BlockTrace, NO_FORWARD_REFERENCE, read_record};
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{self, BufReader, BufWriter, Read, Write};
+use std::io::{self, BufReader, Read};
 use std::path::Path;
 use xz2::read::XzDecoder;
-use zstd::stream::write::Encoder;
 
 const RECORD_SIZE: usize = 64;
 const CACHE_LINE_SIZE: u64 = 64;
@@ -21,19 +19,6 @@ pub struct MemoryAccess {
     pub pc: u64,
     pub address: u64,
     pub kind: AccessKind,
-}
-
-fn read_record(reader: &mut impl Read, record: &mut [u8; RECORD_SIZE]) -> io::Result<usize> {
-    let mut filled = 0;
-    while filled < record.len() {
-        match reader.read(&mut record[filled..]) {
-            Ok(0) => break,
-            Ok(count) => filled += count,
-            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
-            Err(error) => return Err(error),
-        }
-    }
-    Ok(filled)
 }
 
 fn u64_at(record: &[u8; RECORD_SIZE], offset: usize) -> u64 {
@@ -63,7 +48,7 @@ pub fn read_accesses(
 
         let pc = u64_at(&record, 0);
         // Reads precede writes for read-modify-write instructions. Slot order
-        // within each operand group is the order in the record.
+        // within each operand group is preserved.
         for offset in (32..64).step_by(8) {
             let address = u64_at(&record, offset);
             if address != 0 {
@@ -104,14 +89,13 @@ pub fn read_trace(path: &Path, emit: impl FnMut(MemoryAccess) -> io::Result<()>)
 pub fn convert(
     input_path: &Path,
     output_directory: &Path,
-    progress: &ProgressBar,
-) -> Result<ProcessedTrace, Box<dyn std::error::Error>> {
+) -> Result<BlockTrace, Box<dyn std::error::Error>> {
     std::fs::create_dir_all(output_directory)?;
-    progress.set_message("reading ChampSim trace…");
-
-    let mut pcs = Vec::<u32>::new();
-    let mut block_tags = Vec::<u32>::new();
-    let mut forward_refs = Vec::<i32>::new();
+    let mut trace = BlockTrace {
+        pcs: Vec::new(),
+        block_tags: Vec::new(),
+        forward_refs: Vec::new(),
+    };
     let mut last_seen = HashMap::<u32, usize>::new();
 
     read_trace(input_path, |access| {
@@ -127,43 +111,29 @@ pub fn convert(
                 "ChampSim cache-line address does not fit in u32",
             )
         })?;
-        let current = block_tags.len();
+        let current = trace.len();
         if let Some(previous) = last_seen.insert(block_tag, current) {
-            forward_refs[previous] = i32::try_from(current - previous).map_err(|_| {
+            trace.forward_refs[previous] = i32::try_from(current - previous).map_err(|_| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
                     "forward reuse interval exceeds i32",
                 )
             })?;
         }
-        pcs.push(pc);
-        block_tags.push(block_tag);
-        forward_refs.push(i32::MAX);
+        trace.pcs.push(pc);
+        trace.block_tags.push(block_tag);
+        trace.forward_refs.push(NO_FORWARD_REFERENCE);
         Ok(())
     })?;
 
-    progress.set_message("writing block_trace.bin.zst…");
-    let output = BufWriter::new(File::create(output_directory.join("block_trace.bin.zst"))?);
-    let mut writer = Encoder::new(output, 0)?;
-    for ((pc, forward_ref), block_tag) in pcs.iter().zip(&forward_refs).zip(&block_tags) {
-        let mut record = [0; 12];
-        record[0..4].copy_from_slice(&pc.to_le_bytes());
-        record[4..8].copy_from_slice(&forward_ref.to_le_bytes());
-        record[8..12].copy_from_slice(&block_tag.to_le_bytes());
-        writer.write_all(&record)?;
-    }
-    writer.finish()?;
-
-    Ok(ProcessedTrace {
-        block_tags,
-        forward_refs,
-    })
+    trace.write_zstd(output_directory.join("block_trace.bin.zst"))?;
+    Ok(trace)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Cursor;
+    use std::io::{Cursor, Write};
     use std::time::{SystemTime, UNIX_EPOCH};
     use xz2::write::XzEncoder;
 
@@ -231,7 +201,7 @@ mod tests {
             .unwrap()
             .as_nanos();
         let directory = std::env::temp_dir().join(format!(
-            "constructive-opt-champsim-{}-{unique}",
+            "blocktrace-champsim-{}-{unique}",
             std::process::id()
         ));
         std::fs::create_dir(&directory).unwrap();
